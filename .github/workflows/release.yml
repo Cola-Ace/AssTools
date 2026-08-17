@@ -9,10 +9,11 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
       - uses: microsoft/setup-powershell@v1
       - shell: pwsh
         run: ./scripts/build-release.ps1 $env:GITHUB_REF_NAME
