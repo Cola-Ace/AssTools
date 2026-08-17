@@ -29,11 +29,11 @@ Apply 1 change to "episode.ass"?
 Confirm [y/N]
 ```
 
-Exit codes: `0` = success, warnings, or cancellation; `1` = compliance errors or unresolved manual items after normalization; `2` = usage, encoding, I/O, backup, or replacement failures. The first release handles one valid UTF-8 `.ass` file at a time. JSON, batch directories, stdin, SSA/ASS2, 32-bit targets, auto-update, signing, notarization, and package-manager distribution are intentionally out of scope.
+Exit codes: `0` = success, warnings, or cancellation; `1` = compliance errors or unresolved manual items after normalization; `2` = usage, encoding, I/O, backup, or replacement failures.
 
 ## Installation
 
-Download the binary for Windows, Linux, or macOS (`amd64` or `arm64`) from a release and place `asst`/`asst.exe` on your `PATH`. macOS binaries are unsigned and not notarized.
+Download the binary for Windows, Linux, or macOS (`amd64` or `arm64`) from a release and place `asst`/`asst.exe` on your `PATH`.
 
 ## Building
 
@@ -42,8 +42,4 @@ go build ./cmd/asst
 go test ./...
 ```
 
-Release builds are made with `CGO_ENABLED=0`, `-trimpath`, and `-ldflags="-s -w"` for Windows, Linux, and macOS amd64/arm64 targets. macOS artifacts are unsigned and not notarized in this release.
-
-## License
-
-MIT; see [LICENSE](LICENSE).
+Release builds are made with `CGO_ENABLED=0`, `-trimpath`, and `-ldflags="-s -w"` for Windows, Linux, and macOS amd64/arm64 targets.

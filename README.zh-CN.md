@@ -15,11 +15,11 @@ asst help [command]
 
 `auto` 会保留合法的现有 Matrix；缺失或非法时优先根据 `LayoutRes` 推断，1080p 为 `TV.709`、720p 为 `TV.601`，再回退到 `PlayRes`。显式值支持 `None`、`TV.601`、`TV.709`、`TV.240M`、`TV.FCC` 及对应的 `PC.*` 值，大小写不敏感并在预览/写回时使用规范大小写。
 
-退出码：`0` = 成功、仅有 warning 或用户取消；`1` = 检查发现规范错误，或规范化后仍有未解决的 manual 项；`2` = 参数、编码、I/O、备份或替换失败。首版只处理单个有效 UTF-8 `.ass` 文件，不提供 JSON、批量目录、stdin、SSA/ASS2、32 位目标、自动更新、签名、公证或包管理器分发。
+退出码：`0` = 成功、仅有 warning 或用户取消；`1` = 检查发现规范错误，或规范化后仍有未解决的 manual 项；`2` = 参数、编码、I/O、备份或替换失败。
 
 ## 安装
 
-从 Release 下载对应 Windows、Linux 或 macOS 的 `amd64`/`arm64` 二进制文件，直接将 `asst`/`asst.exe` 放入 `PATH`。macOS 二进制未签名且未公证。
+从 Release 下载对应 Windows、Linux 或 macOS 的 `amd64`/`arm64` 二进制文件，直接将 `asst`/`asst.exe` 放入 `PATH`。
 
 ## 构建
 
@@ -28,8 +28,4 @@ go build ./cmd/asst
 go test ./...
 ```
 
-发布脚本使用 `CGO_ENABLED=0`、`-trimpath` 和 `-ldflags="-s -w"` 构建 Windows、Linux、macOS 的 amd64/arm64 版本。首版 macOS 二进制未签名且未公证。
-
-## 许可证
-
-MIT，详见 [LICENSE](LICENSE)。
+发布脚本使用 `CGO_ENABLED=0`、`-trimpath` 和 `-ldflags="-s -w"` 构建 Windows、Linux、macOS 的 amd64/arm64 版本。
