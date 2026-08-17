@@ -16,6 +16,14 @@ import (
 )
 
 func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int {
+	return normalize(path, matrixMode, false, in, out, errOut)
+}
+
+func NormalizeWithBackup(path, matrixMode string, in io.Reader, out, errOut io.Writer) int {
+	return normalize(path, matrixMode, true, in, out, errOut)
+}
+
+func normalize(path, matrixMode string, backupEnabled bool, in io.Reader, out, errOut io.Writer) int {
 	if canonical, ok := rules.NormalizeMatrixValue(matrixMode); ok {
 		matrixMode = canonical
 	}
@@ -73,16 +81,23 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 		}
 		return 0
 	}
-	backup := path + ".bak"
-	if _, statErr := os.Stat(backup); statErr == nil {
-		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: backup already exists: %s", backup)))
-		return 2
-	} else if !os.IsNotExist(statErr) {
-		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot inspect backup path %s: %s", backup, statErr)))
-		return 2
+	backup := ""
+	if backupEnabled {
+		backup = path + ".bak"
+		if _, statErr := os.Stat(backup); statErr == nil {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: backup already exists: %s", backup)))
+			return 2
+		} else if !os.IsNotExist(statErr) {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot inspect backup path %s: %s", backup, statErr)))
+			return 2
+		}
 	}
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Yellow, fmt.Sprintf("Apply %d %s to %s?", len(edits), plural(len(edits), "change", "changes"), formatEditValue(path))))
-	fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, fmt.Sprintf("Backup: %s [y/N]", formatEditValue(backup))))
+	if backupEnabled {
+		fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, fmt.Sprintf("Backup: %s [y/N]", formatEditValue(backup))))
+	} else {
+		fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, "Confirm [y/N]"))
+	}
 	reader := bufio.NewReader(in)
 	answer, readErr := reader.ReadString('\n')
 	if readErr != nil && len(answer) == 0 {
@@ -109,9 +124,11 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot stat input: %s", err)))
 		return 2
 	}
-	if err := writeBackup(backup, current, info.Mode().Perm()); err != nil {
-		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot write backup %s: %s", backup, err)))
-		return 2
+	if backupEnabled {
+		if err := writeBackup(backup, current, info.Mode().Perm()); err != nil {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot write backup %s: %s", backup, err)))
+			return 2
+		}
 	}
 	if err := replaceFile(path, candidate, info.Mode().Perm()); err != nil {
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot replace %s: %s", path, err)))
@@ -123,7 +140,9 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 		return 2
 	}
 	fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Applied %d %s.", len(edits), plural(len(edits), "change", "changes"))))
-	fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Backup written: %s", formatEditValue(backup))))
+	if backupEnabled {
+		fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Backup written: %s", formatEditValue(backup))))
+	}
 	recheckStyle := terminal.Green
 	if after.ErrorCount() > 0 {
 		recheckStyle = terminal.Red

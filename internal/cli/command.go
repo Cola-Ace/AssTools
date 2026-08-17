@@ -33,7 +33,7 @@ func commandRegistry() []commandSpec {
 		},
 		{
 			name:    "normalize",
-			usage:   "asst normalize [--matrix <auto|value>] <input.ass>",
+			usage:   "asst normalize [--backup] [--matrix <auto|value>] <input.ass>",
 			summary: "preview safe edits, then optionally apply them",
 			handler: runNormalize,
 			help:    printNormalizeHelp,
