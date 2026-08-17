@@ -34,6 +34,7 @@ func runCheck(args []string, _ io.Reader, out, errOut io.Writer) int {
 
 func printCheckHelp(out io.Writer) {
 	fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Usage: asst check [--ignore-vsfiltermod] <input.ass>"))
+	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Print diagnostics as path:line: severity[code]: message.")
 	fmt.Fprintln(out, "Use --ignore-vsfiltermod to hide VSFilterMod compatibility warnings; syntax errors remain visible.")
 }

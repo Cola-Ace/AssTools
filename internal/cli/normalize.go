@@ -58,6 +58,7 @@ func canonicalMatrix(value string) (string, bool) {
 
 func printNormalizeHelp(out io.Writer) {
 	fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Usage: asst normalize [--matrix <auto|value>] <input.ass>"))
+	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Preview safe edits and apply them only after a y/yes confirmation.")
 	fmt.Fprintln(out, "The default matrix mode is auto; explicit values use canonical spelling.")
 }

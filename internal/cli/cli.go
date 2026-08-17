@@ -64,6 +64,7 @@ func usageForCommand(errOut io.Writer, command, message string) int {
 
 func printUsageError(out io.Writer, message string) {
 	fmt.Fprintln(out, terminal.Color(out, terminal.Red, fmt.Sprintf("asst: %s", message)))
+	fmt.Fprintln(out)
 }
 
 func printHelp(out io.Writer, command string) {

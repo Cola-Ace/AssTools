@@ -18,6 +18,15 @@ func TestRunHelpAndUsageErrors(t *testing.T) {
 	if code := Run([]string{"normalize", "--matrix", "bad", "x.ass"}, strings.NewReader(""), &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "invalid matrix") {
 		t.Fatalf("usage failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
 	}
+	out.Reset()
+	errOut.Reset()
+	if code := Run([]string{"info"}, strings.NewReader(""), &out, &errOut); code != 2 {
+		t.Fatalf("missing input should be a usage error: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	want := "asst: info requires exactly one .ass file\n\nUsage: asst info <input.ass>\n\nPrint file metadata, sections, styles, fonts, events, and a compliance summary.\n"
+	if got := errOut.String(); got != want {
+		t.Fatalf("usage spacing mismatch: got=%q want=%q", got, want)
+	}
 }
 
 func TestNormalizeCancelDoesNotWrite(t *testing.T) {
