@@ -1,5 +1,7 @@
 # asst
 
+[简体中文](README.zh-CN.md)
+
 `asst` is a small cross-platform command-line checker and normalizer for ASS subtitle files. It uses only the Go standard library and keeps untouched source bytes, UTF-8 BOMs, line endings, and unknown sections intact.
 
 ## Commands
