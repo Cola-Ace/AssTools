@@ -31,6 +31,11 @@ func TestNormalizeCancelDoesNotWrite(t *testing.T) {
 	if code := Run([]string{"normalize", path}, strings.NewReader("n\n"), &out, &errOut); code != 0 || errOut.Len() != 0 {
 		t.Fatalf("normalize failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
 	}
+	for _, want := range []string{"Input: \"" + path + "\"", "Backup: \"" + path + ".bak\" [y/N]"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("normalize output is missing raw path %q: %q", want, out.String())
+		}
+	}
 	got, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("input changed: %v %q", err, got)

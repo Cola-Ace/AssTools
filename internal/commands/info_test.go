@@ -136,4 +136,7 @@ func TestInfoIncludesComplianceDetails(t *testing.T) {
 			t.Fatalf("info output is missing %q:\n%s", want, out.String())
 		}
 	}
+	if want := "Path: \"" + path + "\""; !strings.Contains(out.String(), want) {
+		t.Fatalf("info output is missing raw path %q:\n%s", want, out.String())
+	}
 }

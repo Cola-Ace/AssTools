@@ -21,7 +21,7 @@ func Info(path string, out, errOut io.Writer) int {
 	}
 	source := doc.Source
 	fmt.Fprintln(out, terminal.Color(out, terminal.Bold+terminal.Cyan, "== File =="))
-	fmt.Fprintf(out, "Path: %q\n", path)
+	fmt.Fprintf(out, "Path: %s\n", formatEditValue(path))
 	fmt.Fprintf(out, "Size: %d bytes\n", len(source.Original))
 	fmt.Fprintln(out, "Encoding: UTF-8")
 	fmt.Fprintf(out, "BOM: %s\n", yesNo(source.BOM))

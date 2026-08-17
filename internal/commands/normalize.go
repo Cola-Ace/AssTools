@@ -44,7 +44,7 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 		return 2
 	}
 	fmt.Fprintln(out, terminal.Color(out, terminal.Bold+terminal.Cyan, "== Normalize preview =="))
-	fmt.Fprintf(out, "Input: %q\n", path)
+	fmt.Fprintf(out, "Input: %s\n", formatEditValue(path))
 	fmt.Fprintf(out, "Matrix mode: %s\n", matrixMode)
 	printMatrixDecision(out, doc, matrixMode)
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold, "Changes:"))
@@ -81,8 +81,8 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot inspect backup path %s: %s", backup, statErr)))
 		return 2
 	}
-	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Yellow, fmt.Sprintf("Apply %d %s to %q?", len(edits), plural(len(edits), "change", "changes"), path)))
-	fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, fmt.Sprintf("Backup: %q [y/N]", backup)))
+	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Yellow, fmt.Sprintf("Apply %d %s to %s?", len(edits), plural(len(edits), "change", "changes"), formatEditValue(path))))
+	fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, fmt.Sprintf("Backup: %s [y/N]", formatEditValue(backup))))
 	reader := bufio.NewReader(in)
 	answer, readErr := reader.ReadString('\n')
 	if readErr != nil && len(answer) == 0 {
@@ -123,7 +123,7 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 		return 2
 	}
 	fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Applied %d %s.", len(edits), plural(len(edits), "change", "changes"))))
-	fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Backup written: %q", backup)))
+	fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Backup written: %s", formatEditValue(backup))))
 	recheckStyle := terminal.Green
 	if after.ErrorCount() > 0 {
 		recheckStyle = terminal.Red
@@ -170,8 +170,8 @@ func sourceFormatEdits(doc *ass.Document) []rules.Edit {
 
 func printEdit(out io.Writer, edit rules.Edit) {
 	code := terminal.Color(out, terminal.Cyan, "["+edit.Code+"]")
-	before := terminal.Color(out, terminal.Red, fmt.Sprintf("%q", edit.Before))
-	after := terminal.Color(out, terminal.Green, fmt.Sprintf("%q", edit.After))
+	before := terminal.Color(out, terminal.Red, formatEditValue(edit.Before))
+	after := terminal.Color(out, terminal.Green, formatEditValue(edit.After))
 	if edit.Start == edit.End && edit.Before == "<missing>" {
 		fmt.Fprintf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description)
 		fmt.Fprintf(out, "    before: %s\n    after:  %s\n", before, after)
@@ -183,6 +183,10 @@ func printEdit(out io.Writer, edit rules.Edit) {
 	}
 	fmt.Fprintf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description)
 	fmt.Fprintf(out, "    before: %s\n    after:  %s\n", before, after)
+}
+
+func formatEditValue(value string) string {
+	return strings.ReplaceAll(fmt.Sprintf("%q", value), `\\`, `\`)
 }
 
 func printMatrixDecision(out io.Writer, doc *ass.Document, matrixMode string) {
