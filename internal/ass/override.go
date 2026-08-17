@@ -13,10 +13,11 @@ type OverrideBlock struct {
 }
 
 type OverrideTag struct {
-	Name      string
-	Arguments string
-	Span      Span
-	Known     bool
+	Name        string
+	Arguments   string
+	Span        Span
+	Known       bool
+	VSFilterMod bool
 }
 
 // ScanOverrideSyntax returns syntax errors found in an event's override blocks.
@@ -161,6 +162,46 @@ func invalidOverrideArguments(name, raw string) string {
 			if strings.TrimSpace(inside) == "" {
 				return "override tag \\" + name + " has invalid arguments"
 			}
+		case "distort":
+			if !validNumberList(inside, 6) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "jitter":
+			if !validNumberList(inside, 5, 6) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "mover":
+			if !validNumberList(inside, 8, 10) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "moves3":
+			if !validNumberList(inside, 6, 8) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "moves4":
+			if !validNumberList(inside, 8, 10) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "movevc":
+			if !validNumberList(inside, 2, 4, 6) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "vc", "1vc", "2vc", "3vc", "4vc":
+			if !validOverrideColorList(inside, false) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "va", "1va", "2va", "3va", "4va":
+			if !validOverrideColorList(inside, true) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "img", "1img", "2img", "3img", "4img":
+			if !validImageArguments(inside) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "lua":
+			if strings.TrimSpace(inside) == "" {
+				return "override tag \\" + name + " has invalid arguments"
+			}
 		case "t":
 			if strings.TrimSpace(inside) == "" {
 				return "override tag \\" + name + " has invalid arguments"
@@ -197,8 +238,17 @@ func invalidOverrideArguments(name, raw string) string {
 		if err != nil || value < 0 || value > 1 {
 			return "override tag \\" + name + " has invalid arguments"
 		}
-	case "b", "be", "blur", "bord", "xbord", "ybord", "shad", "xshad", "yshad", "fr", "frx", "fry", "frz", "fscx", "fscy", "fsp", "fax", "fay", "fs", "pbo", "k", "kf", "ko", "kt":
+	case "b", "be", "blur", "bord", "xbord", "ybord", "shad", "xshad", "yshad", "fr", "frx", "fry", "frz", "fsc", "fscx", "fscy", "fsp", "fax", "fay", "fe", "fs", "fsvp", "fshp", "frs", "xblur", "yblur", "z", "rnd", "rndx", "rndy", "rndz", "k", "kf", "ko", "kt":
 		if !validNumber(args) {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	case "ortho":
+		value, err := strconv.Atoi(args)
+		if err != nil || value < 0 || value > 1 {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	case "blend":
+		if !validBlendArguments(args) {
 			return "override tag \\" + name + " has invalid arguments"
 		}
 	case "c", "1c", "2c", "3c", "4c", "alpha", "1a", "2a", "3a", "4a":
@@ -215,7 +265,7 @@ func invalidOverrideArguments(name, raw string) string {
 
 func requiresParentheses(tag string) bool {
 	switch tag {
-	case "pos", "move", "org", "clip", "iclip", "fad", "fade", "t":
+	case "pos", "move", "org", "clip", "iclip", "fad", "fade", "t", "distort", "jitter", "mover", "moves3", "moves4", "movevc", "vc", "va", "1vc", "2vc", "3vc", "4vc", "1va", "2va", "3va", "4va", "img", "1img", "2img", "3img", "4img", "lua":
 		return true
 	default:
 		return false
@@ -268,6 +318,71 @@ func validOverrideColor(value string) bool {
 	}
 	_, err := strconv.ParseUint(digits, 16, 32)
 	return err == nil
+}
+
+func validOverrideColorList(value string, alpha bool) bool {
+	parts := strings.Split(value, ",")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, part := range parts {
+		valid := validOverrideColor
+		if alpha {
+			valid = validOverrideAlpha
+		}
+		if !valid(strings.TrimSpace(part)) {
+			return false
+		}
+	}
+	return true
+}
+
+func validOverrideAlpha(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) < 4 || !strings.EqualFold(trimmed[:2], "&H") || trimmed[len(trimmed)-1] != '&' {
+		return false
+	}
+	digits := trimmed[2 : len(trimmed)-1]
+	if len(digits) == 0 || len(digits) > 2 {
+		return false
+	}
+	_, err := strconv.ParseUint(digits, 16, 8)
+	return err == nil
+}
+
+func validImageArguments(value string) bool {
+	parts := strings.Split(value, ",")
+	if len(parts) < 1 || len(parts) > 3 || strings.TrimSpace(parts[0]) == "" {
+		return false
+	}
+	for _, part := range parts[1:] {
+		if !validNumber(strings.TrimSpace(part)) {
+			return false
+		}
+	}
+	return true
+}
+
+func validBlendArguments(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	if inside, ok := parenthesizedArguments(trimmed); ok {
+		inside = strings.TrimSpace(inside)
+		if blend, err := strconv.Atoi(inside); err == nil {
+			return blend >= 0 && blend <= 6
+		}
+		allowed := map[string]bool{
+			"normal": true, "over": true, "overlay": true, "add": true,
+			"sub": true, "subtract": true, "substract": true,
+			"mult": true, "multiply": true, "scr": true, "screen": true,
+			"diff": true, "difference": true,
+		}
+		return allowed[strings.ToLower(inside)]
+	}
+	blend, err := strconv.Atoi(trimmed)
+	return err == nil && blend >= 0 && blend <= 6
 }
 
 func ScanOverrides(event Event) []OverrideBlock {
@@ -348,19 +463,35 @@ func scanTags(body string, absoluteStart int) []OverrideTag {
 			i++
 		}
 	done:
-		known := knownOverride(strings.ToLower(name))
+		lowerName := strings.ToLower(name)
+		vsfiltermod := vsfiltermodOverride(lowerName)
 		tags = append(tags, OverrideTag{
-			Name:      name,
-			Arguments: body[argStart:i],
-			Span:      Span{Start: absoluteStart + start, End: absoluteStart + i},
-			Known:     known,
+			Name:        name,
+			Arguments:   body[argStart:i],
+			Span:        Span{Start: absoluteStart + start, End: absoluteStart + i},
+			Known:       knownOverride(lowerName),
+			VSFilterMod: vsfiltermod,
 		})
+		if strings.EqualFold(name, "t") {
+			rawArguments := body[argStart:i]
+			if nested, ok := parenthesizedArguments(strings.TrimSpace(rawArguments)); ok {
+				open := strings.Index(rawArguments, "(")
+				if open < 0 {
+					continue
+				}
+				for _, nestedTag := range scanTags(nested, absoluteStart+argStart+open+1) {
+					if nestedTag.VSFilterMod {
+						tags = append(tags, nestedTag)
+					}
+				}
+			}
+		}
 	}
 	return tags
 }
 
 func matchKnownName(value string) string {
-	known := []string{"alpha", "blur", "move", "clip", "iclip", "fade", "pos", "org", "bord", "shad", "frx", "fry", "frz", "fscx", "fscy", "fsp", "fax", "fay", "pbo", "xbord", "ybord", "xshad", "yshad", "an", "fn", "fs", "be", "t", "q", "r", "a", "b", "i", "u", "s", "p", "k", "K", "kf", "ko", "kt", "c", "1c", "2c", "3c", "4c", "1a", "2a", "3a", "4a"}
+	known := []string{"alpha", "blur", "move", "moves3", "moves4", "mover", "clip", "iclip", "fade", "fad", "pos", "org", "bord", "shad", "frx", "fry", "frz", "fr", "fsc", "fscx", "fscy", "fsp", "fax", "fay", "pbo", "xbord", "ybord", "xshad", "yshad", "an", "fn", "fs", "be", "fsvp", "fshp", "frs", "xblur", "yblur", "z", "rnd", "rndx", "rndy", "rndz", "distort", "jitter", "movevc", "ortho", "blend", "img", "1img", "2img", "3img", "4img", "vc", "va", "1vc", "2vc", "3vc", "4vc", "1va", "2va", "3va", "4va", "lua", "t", "q", "r", "a", "b", "i", "u", "s", "p", "k", "K", "kf", "ko", "kt", "c", "1c", "2c", "3c", "4c", "1a", "2a", "3a", "4a", "fe"}
 	matched := ""
 	for _, name := range known {
 		if len(name) > len(matched) && len(value) >= len(name) && strings.EqualFold(value[:len(name)], name) {
@@ -372,7 +503,16 @@ func matchKnownName(value string) string {
 
 func knownOverride(name string) bool {
 	switch name {
-	case "a", "an", "b", "be", "blur", "bord", "c", "1c", "2c", "3c", "4c", "1a", "2a", "3a", "4a", "alpha", "clip", "iclip", "fad", "fade", "fax", "fay", "fn", "fr", "frx", "fry", "frz", "fs", "fscx", "fscy", "fsp", "k", "K", "kf", "ko", "kt", "q", "r", "shad", "s", "t", "u", "pos", "move", "org", "p", "pbo", "xbord", "ybord", "xshad", "yshad":
+	case "a", "an", "b", "be", "blur", "bord", "c", "1c", "2c", "3c", "4c", "1a", "2a", "3a", "4a", "alpha", "clip", "iclip", "fad", "fade", "fax", "fay", "fe", "fn", "fr", "frx", "fry", "frz", "fs", "fscx", "fscy", "fsp", "k", "K", "kf", "ko", "kt", "q", "r", "shad", "s", "t", "u", "pos", "move", "org", "p", "pbo", "xbord", "ybord", "xshad", "yshad":
+		return true
+	default:
+		return false
+	}
+}
+
+func vsfiltermodOverride(name string) bool {
+	switch strings.ToLower(name) {
+	case "fsc", "fsvp", "frs", "z", "distort", "rnd", "rndx", "rndy", "rndz", "mover", "moves3", "moves4", "jitter", "movevc", "xblur", "yblur", "fshp", "ortho", "blend", "img", "1img", "2img", "3img", "4img", "vc", "va", "1vc", "2vc", "3vc", "4vc", "1va", "2va", "3va", "4va", "lua":
 		return true
 	default:
 		return false

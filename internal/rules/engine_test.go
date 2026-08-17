@@ -85,3 +85,46 @@ Comment: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\pos(100,200}comment
 		t.Fatalf("expected one Dialogue override syntax diagnostic, got %d: %#v", count, result.Diagnostics)
 	}
 }
+
+func TestRunMarksVSFilterModTagsSeparatelyFromSyntax(t *testing.T) {
+	data := []byte(`[Script Info]
+ScriptType: v4.00+
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+[V4+ Styles]
+Format: Name, Fontname, Fontsize
+Style: Default,Arial,20
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\fsvp10\mover(0,0,100,100,0,0,10,10)}valid
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\fsvpbad}invalid
+`)
+	source, err := ass.ParseBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := ass.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := Run(doc)
+	vsWarnings := 0
+	syntaxErrors := 0
+	for _, diagnostic := range result.Diagnostics {
+		switch diagnostic.Code {
+		case "vsfiltermod-override":
+			vsWarnings++
+			if diagnostic.Severity != SeverityWarning {
+				t.Fatalf("unexpected VSFilterMod diagnostic: %#v", diagnostic)
+			}
+		case "override-syntax":
+			syntaxErrors++
+		}
+	}
+	if vsWarnings != 3 {
+		t.Fatalf("expected three VSFilterMod warnings, got %d: %#v", vsWarnings, result.Diagnostics)
+	}
+	if syntaxErrors != 1 {
+		t.Fatalf("expected one VSFilterMod syntax error, got %d: %#v", syntaxErrors, result.Diagnostics)
+	}
+}

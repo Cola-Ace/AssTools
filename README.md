@@ -6,12 +6,12 @@
 
 ```text
 asst info <input.ass>
-asst check <input.ass>
+asst check [--ignore-vsfiltermod] <input.ass>
 asst normalize [--matrix <auto|value>] <input.ass>
 asst help [command]
 ```
 
-`info` summarizes the file, sections, styles, fonts, events, timing, and compliance. `check` emits stable diagnostics in `path:line: severity[code]: message` form. `normalize` previews safe edits, asks for confirmation, writes a byte-identical `<input.ass>.bak`, then replaces the original with a rechecked candidate.
+`info` summarizes the file, sections, styles, fonts, events, timing, and compliance. `check` emits stable diagnostics in `path:line: severity[code]: message` form. Tag checking follows libass semantics; VSFilterMod extensions receive separate warnings. `--ignore-vsfiltermod` hides only those compatibility warnings, while syntax errors remain visible. `normalize` previews safe edits, asks for confirmation, writes a byte-identical `<input.ass>.bak`, then replaces the original with a rechecked candidate.
 
 The default matrix mode is `auto`. It retains a legal existing value and infers `TV.709` from 1080p or `TV.601` from 720p, preferring `LayoutRes` over `PlayRes`. An explicit value accepts `None`, `TV.601`, `TV.709`, `TV.240M`, `TV.FCC`, and corresponding `PC.*` values (case-insensitive) and is shown in the preview.
 

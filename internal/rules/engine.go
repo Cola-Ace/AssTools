@@ -527,7 +527,9 @@ func runOverrides(doc *ass.Document, add func(Diagnostic)) {
 			drawingMode := false
 			for _, block := range ass.ScanOverrides(event) {
 				for _, tag := range block.Tags {
-					if !tag.Known {
+					if tag.VSFilterMod {
+						add(Diagnostic{Line: event.Line, Severity: SeverityWarning, Code: "vsfiltermod-override", Message: fmt.Sprintf("VSFilterMod override tag \\%s is not supported by libass", tag.Name)})
+					} else if !tag.Known {
 						add(Diagnostic{Line: event.Line, Severity: SeverityWarning, Code: "unknown-override", Message: fmt.Sprintf("unknown override tag \\%s is preserved", tag.Name), Manual: true})
 					}
 					if strings.EqualFold(tag.Name, "q") {

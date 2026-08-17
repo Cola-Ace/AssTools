@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"io"
 
+	"asstools/internal/rules"
 	"asstools/internal/terminal"
 )
 
-func Check(path string, out, errOut io.Writer) int {
+func Check(path string, out, errOut io.Writer, ignoreVSFilterModWarnings ...bool) int {
 	_, result, err := load(path, "auto")
 	if err != nil {
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2
+	}
+	if len(ignoreVSFilterModWarnings) > 0 && ignoreVSFilterModWarnings[0] {
+		result.Diagnostics = withoutVSFilterModWarnings(result.Diagnostics)
 	}
 	if len(result.Diagnostics) == 0 {
 		fmt.Fprintln(out, terminal.Color(out, terminal.Green, "No diagnostics."))
@@ -33,4 +37,15 @@ func Check(path string, out, errOut io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func withoutVSFilterModWarnings(diagnostics []rules.Diagnostic) []rules.Diagnostic {
+	filtered := make([]rules.Diagnostic, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "vsfiltermod-override" && diagnostic.Severity == rules.SeverityWarning {
+			continue
+		}
+		filtered = append(filtered, diagnostic)
+	}
+	return filtered
 }

@@ -26,7 +26,7 @@ func commandRegistry() []commandSpec {
 		},
 		{
 			name:    "check",
-			usage:   "asst check <input.ass>",
+			usage:   "asst check [--ignore-vsfiltermod] <input.ass>",
 			summary: "print stable compliance diagnostics",
 			handler: runCheck,
 			help:    printCheckHelp,
