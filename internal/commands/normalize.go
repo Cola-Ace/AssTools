@@ -63,9 +63,7 @@ func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in
 	if len(edits) == 0 {
 		fmt.Fprintln(out, "  none")
 	} else {
-		for _, edit := range edits {
-			printEdit(out, edit)
-		}
+		printEdits(out, edits)
 	}
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Magenta, "Manual items:"))
 	manuals := manualDiagnostics(result)
@@ -195,8 +193,7 @@ func sourceFormatEdits(doc *ass.Document) []rules.Edit {
 
 func printEdit(out io.Writer, edit rules.Edit) {
 	code := terminal.Color(out, terminal.Cyan, "["+edit.Code+"]")
-	before := terminal.Color(out, terminal.Red, formatEditValue(edit.Before))
-	after := terminal.Color(out, terminal.Green, formatEditValue(edit.After))
+	before, after := formatEditDiff(out, edit.Before, edit.After)
 	if edit.Start == edit.End && edit.Before == "<missing>" {
 		fmt.Fprintf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description)
 		fmt.Fprintf(out, "    before: %s\n    after:  %s\n", before, after)
@@ -208,6 +205,71 @@ func printEdit(out io.Writer, edit rules.Edit) {
 	}
 	fmt.Fprintf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description)
 	fmt.Fprintf(out, "    before: %s\n    after:  %s\n", before, after)
+}
+
+func printEdits(out io.Writer, edits []rules.Edit) {
+	for index, edit := range edits {
+		printEdit(out, edit)
+		if index < len(edits)-1 {
+			fmt.Fprintln(out)
+		}
+	}
+}
+
+func formatEditDiff(out io.Writer, beforeValue, afterValue string) (string, string) {
+	before := formatEditValue(beforeValue)
+	after := formatEditValue(afterValue)
+	oldDiff, newDiff := editValueDiff(before, after)
+	return colorEditValue(out, terminal.Red, terminal.Yellow, oldDiff), colorEditValue(out, terminal.Green, terminal.Cyan, newDiff)
+}
+
+type editValueParts struct {
+	prefix  string
+	changed string
+	suffix  string
+}
+
+func editValueDiff(before, after string) (editValueParts, editValueParts) {
+	beforeRunes := []rune(before)
+	afterRunes := []rune(after)
+	prefixLength := 0
+	for prefixLength < len(beforeRunes) && prefixLength < len(afterRunes) && beforeRunes[prefixLength] == afterRunes[prefixLength] {
+		prefixLength++
+	}
+	suffixLength := 0
+	for prefixLength+suffixLength < len(beforeRunes) && prefixLength+suffixLength < len(afterRunes) && beforeRunes[len(beforeRunes)-1-suffixLength] == afterRunes[len(afterRunes)-1-suffixLength] {
+		suffixLength++
+	}
+	return editValueParts{
+			prefix:  string(beforeRunes[:prefixLength]),
+			changed: string(beforeRunes[prefixLength : len(beforeRunes)-suffixLength]),
+			suffix:  string(beforeRunes[len(beforeRunes)-suffixLength:]),
+		}, editValueParts{
+			prefix:  string(afterRunes[:prefixLength]),
+			changed: string(afterRunes[prefixLength : len(afterRunes)-suffixLength]),
+			suffix:  string(afterRunes[len(afterRunes)-suffixLength:]),
+		}
+}
+
+func colorEditValue(out io.Writer, baseStyle, highlightStyle string, parts editValueParts) string {
+	if !terminal.Enabled(out) {
+		return parts.prefix + parts.changed + parts.suffix
+	}
+	if parts.changed == "" {
+		return terminal.Color(out, baseStyle, parts.prefix+parts.suffix)
+	}
+	var value strings.Builder
+	value.WriteString(baseStyle)
+	value.WriteString(parts.prefix)
+	value.WriteString(highlightStyle)
+	value.WriteString(parts.changed)
+	value.WriteString(terminal.Reset)
+	if parts.suffix != "" {
+		value.WriteString(baseStyle)
+		value.WriteString(parts.suffix)
+		value.WriteString(terminal.Reset)
+	}
+	return value.String()
 }
 
 func formatEditValue(value string) string {

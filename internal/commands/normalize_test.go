@@ -29,6 +29,33 @@ func TestPrintEditKeepsSingleBackslashesReadable(t *testing.T) {
 	}
 }
 
+func TestPrintEditsSeparatesChanges(t *testing.T) {
+	var out bytes.Buffer
+	printEdits(&out, []rules.Edit{
+		{Line: 1, Code: "first", Description: "first change", Before: "old", After: "new"},
+		{Line: 2, Code: "second", Description: "second change", Before: "left", After: "right"},
+	})
+
+	got := out.String()
+	if !strings.Contains(got, "after:  \"new\"\n\n  line 2") {
+		t.Fatalf("printEdits did not separate changes with a blank line: %q", got)
+	}
+	if strings.HasSuffix(got, "\n\n") {
+		t.Fatalf("printEdits added a trailing blank line: %q", got)
+	}
+}
+
+func TestEditValueDiffKeepsSharedTextOutsideChange(t *testing.T) {
+	before, after := editValueDiff(`"hello old world"`, `"hello new world"`)
+
+	if before.prefix != `"hello ` || before.changed != "old" || before.suffix != ` world"` {
+		t.Fatalf("before diff = %#v", before)
+	}
+	if after.prefix != `"hello ` || after.changed != "new" || after.suffix != ` world"` {
+		t.Fatalf("after diff = %#v", after)
+	}
+}
+
 func TestFormatEditValueEscapesLineBreaksWithoutDoublingBackslashes(t *testing.T) {
 	if got, want := formatEditValue("before\r\nafter"), `"before\r\nafter"`; got != want {
 		t.Fatalf("formatEditValue() = %q, want %q", got, want)
