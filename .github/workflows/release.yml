@@ -30,7 +30,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - uses: microsoft/setup-powershell@v1
       - name: Validate release metadata
         id: metadata
         shell: pwsh
@@ -92,7 +91,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - uses: microsoft/setup-powershell@v1
       - name: Validate release metadata
         id: metadata
         shell: pwsh
