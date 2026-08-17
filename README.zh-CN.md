@@ -19,7 +19,7 @@ asst help [command]
 
 ## 安装
 
-从 Release 下载对应 Windows、Linux 或 macOS 的 `amd64`/`arm64` 压缩包，解压后将 `asst`/`asst.exe` 放入 `PATH`。每个压缩包都包含可执行文件、英文/中文 README 和 MIT 许可证；macOS 二进制未签名且未公证。
+从 Release 下载对应 Windows、Linux 或 macOS 的 `amd64`/`arm64` 二进制文件，直接将 `asst`/`asst.exe` 放入 `PATH`。macOS 二进制未签名且未公证。
 
 ## 构建
 

@@ -33,7 +33,7 @@ Exit codes are `0` for success, warnings, or cancellation; `1` for compliance er
 
 ## Installation
 
-Download the archive for Windows, Linux, or macOS (`amd64` or `arm64`) from a release, unpack it, and place `asst`/`asst.exe` on your `PATH`. Each archive contains the executable, this README, the Chinese README, and the MIT license. macOS binaries are unsigned and not notarized.
+Download the binary for Windows, Linux, or macOS (`amd64` or `arm64`) from a release and place `asst`/`asst.exe` on your `PATH`. macOS binaries are unsigned and not notarized.
 
 ## Building
 
