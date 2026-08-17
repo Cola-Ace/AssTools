@@ -518,6 +518,11 @@ func runOverrides(doc *ass.Document, add func(Diagnostic)) {
 			if format == nil || len(event.Values) != len(format.Fields) {
 				continue
 			}
+			if event.Kind == "Dialogue" {
+				for _, issue := range ass.ScanOverrideSyntax(event) {
+					add(Diagnostic{Line: event.Line, Severity: SeverityError, Code: "override-syntax", Message: issue})
+				}
+			}
 			qConflict := false
 			drawingMode := false
 			for _, block := range ass.ScanOverrides(event) {

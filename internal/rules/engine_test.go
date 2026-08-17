@@ -47,3 +47,41 @@ func TestRunFindsExampleSafeEdits(t *testing.T) {
 		}
 	}
 }
+
+func TestRunChecksDialogueOverrideSyntax(t *testing.T) {
+	data := []byte(`[Script Info]
+ScriptType: v4.00+
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+[V4+ Styles]
+Format: Name, Fontname, Fontsize
+Style: Default,Arial,20
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\pos(100,200}broken
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\move(0,0,100,100)}valid
+Comment: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\pos(100,200}comment
+`)
+	source, err := ass.ParseBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := ass.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := Run(doc)
+	count := 0
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code != "override-syntax" {
+			continue
+		}
+		count++
+		if diagnostic.Line != 10 || diagnostic.Severity != SeverityError || !strings.Contains(diagnostic.Message, "unbalanced parentheses") {
+			t.Fatalf("unexpected override syntax diagnostic: %#v", diagnostic)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one Dialogue override syntax diagnostic, got %d: %#v", count, result.Diagnostics)
+	}
+}

@@ -1,6 +1,8 @@
 package ass
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -15,6 +17,257 @@ type OverrideTag struct {
 	Arguments string
 	Span      Span
 	Known     bool
+}
+
+// ScanOverrideSyntax returns syntax errors found in an event's override blocks.
+// It intentionally does not report unknown tag names; those are handled as a
+// separate manual-review diagnostic by the rules engine.
+func ScanOverrideSyntax(event Event) []string {
+	text := event.Text
+	issues := make([]string, 0)
+	depth := 0
+	blockStart := -1
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '{':
+			if depth == 0 {
+				blockStart = i
+			} else {
+				issues = append(issues, "override block contains nested {")
+			}
+			depth++
+		case '}':
+			if depth == 0 {
+				issues = append(issues, "closing } has no matching {")
+				continue
+			}
+			depth--
+			if depth == 0 {
+				issues = append(issues, validateOverrideBody(text[blockStart+1:i])...)
+			}
+		}
+	}
+	if depth > 0 {
+		issues = append(issues, "override block is missing closing }")
+	}
+	return issues
+}
+
+func validateOverrideBody(body string) []string {
+	issues := make([]string, 0)
+	for i := 0; i < len(body); {
+		if body[i] != '\\' {
+			i++
+			continue
+		}
+		nameStart := i + 1
+		i = nameStart
+		if i >= len(body) || (!isOverrideTagLetter(body[i]) && !isOverrideTagDigit(body[i])) {
+			issues = append(issues, "override tag is missing a name after \\")
+			if i < len(body) {
+				i++
+			}
+			continue
+		}
+		if matched := matchKnownName(body[i:]); matched != "" {
+			i += len(matched)
+		} else if isOverrideTagDigit(body[i]) {
+			i++
+			if i >= len(body) || !isOverrideTagLetter(body[i]) {
+				issues = append(issues, "override tag name is invalid")
+				for i < len(body) && body[i] != '\\' {
+					i++
+				}
+				continue
+			}
+			i++
+		} else {
+			for i < len(body) && isOverrideTagLetter(body[i]) {
+				i++
+			}
+		}
+		name := body[nameStart:i]
+		argStart := i
+		parenDepth := 0
+		unmatchedClose := false
+		for i < len(body) {
+			switch body[i] {
+			case '(':
+				parenDepth++
+			case ')':
+				if parenDepth == 0 {
+					unmatchedClose = true
+				} else {
+					parenDepth--
+				}
+			case '\\':
+				if parenDepth == 0 {
+					goto tagDone
+				}
+			}
+			i++
+		}
+	tagDone:
+		args := body[argStart:i]
+		if unmatchedClose || parenDepth != 0 {
+			issues = append(issues, fmtOverrideParens(name))
+			continue
+		}
+		if issue := invalidOverrideArguments(name, args); issue != "" {
+			issues = append(issues, issue)
+		}
+	}
+	return issues
+}
+
+func isOverrideTagLetter(value byte) bool {
+	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
+}
+
+func isOverrideTagDigit(value byte) bool {
+	return value >= '0' && value <= '9'
+}
+
+func fmtOverrideParens(name string) string {
+	return "override tag \\" + name + " has unbalanced parentheses"
+}
+
+func invalidOverrideArguments(name, raw string) string {
+	tag := strings.ToLower(name)
+	args := strings.TrimSpace(raw)
+	if requiresParentheses(tag) {
+		inside, ok := parenthesizedArguments(args)
+		if !ok {
+			return "override tag \\" + name + " requires parenthesized arguments"
+		}
+		switch tag {
+		case "pos", "org":
+			if !validNumberList(inside, 2) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "move":
+			if !validNumberList(inside, 4, 6) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "fad":
+			if !validNumberList(inside, 2) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "fade":
+			if !validNumberList(inside, 7) {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "clip", "iclip":
+			if strings.TrimSpace(inside) == "" {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+		case "t":
+			if strings.TrimSpace(inside) == "" {
+				return "override tag \\" + name + " has invalid arguments"
+			}
+			if nested := validateOverrideBody(inside); len(nested) > 0 {
+				return nested[0]
+			}
+		}
+		return ""
+	}
+	switch tag {
+	case "an":
+		value, err := strconv.Atoi(args)
+		if err != nil || value < 1 || value > 9 {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	case "a":
+		value, err := strconv.Atoi(args)
+		if err != nil || value < 1 || value > 9 {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	case "q":
+		value, err := strconv.Atoi(args)
+		if err != nil || value < 0 || value > 3 {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	case "p":
+		value, err := strconv.Atoi(args)
+		if err != nil || value < 0 {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	case "i", "u", "s":
+		value, err := strconv.Atoi(args)
+		if err != nil || value < 0 || value > 1 {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	case "b", "be", "blur", "bord", "xbord", "ybord", "shad", "xshad", "yshad", "fr", "frx", "fry", "frz", "fscx", "fscy", "fsp", "fax", "fay", "fs", "pbo", "k", "kf", "ko", "kt":
+		if !validNumber(args) {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	case "c", "1c", "2c", "3c", "4c", "alpha", "1a", "2a", "3a", "4a":
+		if args != "" && !validOverrideColor(args) {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	case "fn":
+		if args == "" {
+			return "override tag \\" + name + " has invalid arguments"
+		}
+	}
+	return ""
+}
+
+func requiresParentheses(tag string) bool {
+	switch tag {
+	case "pos", "move", "org", "clip", "iclip", "fad", "fade", "t":
+		return true
+	default:
+		return false
+	}
+}
+
+func parenthesizedArguments(value string) (string, bool) {
+	if len(value) < 2 || value[0] != '(' || value[len(value)-1] != ')' {
+		return "", false
+	}
+	return value[1 : len(value)-1], true
+}
+
+func validNumberList(value string, allowed ...int) bool {
+	parts := strings.Split(value, ",")
+	validCount := false
+	for _, count := range allowed {
+		if len(parts) == count {
+			validCount = true
+			break
+		}
+	}
+	if !validCount {
+		return false
+	}
+	for _, part := range parts {
+		if !validNumber(strings.TrimSpace(part)) {
+			return false
+		}
+	}
+	return true
+}
+
+func validNumber(value string) bool {
+	if value == "" {
+		return false
+	}
+	number, err := strconv.ParseFloat(value, 64)
+	return err == nil && !math.IsNaN(number) && !math.IsInf(number, 0)
+}
+
+func validOverrideColor(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) < 4 || !strings.EqualFold(trimmed[:2], "&H") || trimmed[len(trimmed)-1] != '&' {
+		return false
+	}
+	digits := trimmed[2 : len(trimmed)-1]
+	if len(digits) == 0 || len(digits) > 8 {
+		return false
+	}
+	_, err := strconv.ParseUint(digits, 16, 32)
+	return err == nil
 }
 
 func ScanOverrides(event Event) []OverrideBlock {
@@ -108,12 +361,13 @@ func scanTags(body string, absoluteStart int) []OverrideTag {
 
 func matchKnownName(value string) string {
 	known := []string{"alpha", "blur", "move", "clip", "iclip", "fade", "pos", "org", "bord", "shad", "frx", "fry", "frz", "fscx", "fscy", "fsp", "fax", "fay", "pbo", "xbord", "ybord", "xshad", "yshad", "an", "fn", "fs", "be", "t", "q", "r", "a", "b", "i", "u", "s", "p", "k", "K", "kf", "ko", "kt", "c", "1c", "2c", "3c", "4c", "1a", "2a", "3a", "4a"}
+	matched := ""
 	for _, name := range known {
-		if len(value) >= len(name) && strings.EqualFold(value[:len(name)], name) {
-			return value[:len(name)]
+		if len(name) > len(matched) && len(value) >= len(name) && strings.EqualFold(value[:len(name)], name) {
+			matched = value[:len(name)]
 		}
 	}
-	return ""
+	return matched
 }
 
 func knownOverride(name string) bool {
