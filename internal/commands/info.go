@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"text/tabwriter"
 
 	"asstools/internal/ass"
 	"asstools/internal/rules"
@@ -52,12 +53,10 @@ func Info(path string, out, errOut io.Writer) int {
 		fmt.Fprintln(out, "Matrix candidate: unavailable")
 	}
 
-	styles, fonts, undefined := styleSummary(doc)
+	styles, fonts, undefined := styleRowsSummary(doc)
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Cyan, "== Styles =="))
 	fmt.Fprintf(out, "Definitions: %d\n", len(styles))
-	for _, style := range styles {
-		fmt.Fprintf(out, "  %s\n", style)
-	}
+	printStyleTable(out, styles)
 	fmt.Fprintf(out, "Fonts used: %s\n", joinOrNone(fonts))
 	fmt.Fprintf(out, "Undefined style references: %d\n", undefined)
 
@@ -81,8 +80,35 @@ func Info(path string, out, errOut io.Writer) int {
 	return 0
 }
 
+const (
+	styleTableMaxWidth = 120
+	styleCellMaxWidth  = 32
+)
+
+type styleColumn struct {
+	key   string
+	label string
+}
+
+type styleRow struct {
+	name   string
+	font   string
+	size   string
+	fields []styleColumn
+	values map[string]string
+}
+
 func styleSummary(doc *ass.Document) ([]string, []string, int) {
-	styles := make([]string, 0)
+	rows, fonts, undefined := styleRowsSummary(doc)
+	styles := make([]string, 0, len(rows))
+	for _, row := range rows {
+		styles = append(styles, fmt.Sprintf("%s  %s  %s", row.name, row.font, row.size))
+	}
+	return styles, fonts, undefined
+}
+
+func styleRowsSummary(doc *ass.Document) ([]styleRow, []string, int) {
+	styles := make([]styleRow, 0)
 	fonts := map[string]bool{}
 	defined := map[string]bool{}
 	definedFolded := map[string]int{}
@@ -97,7 +123,13 @@ func styleSummary(doc *ass.Document) ([]string, []string, int) {
 			if font != "" {
 				fonts[font] = true
 			}
-			styles = append(styles, fmt.Sprintf("%s  %s  %s", style.Name, font, styleValue(style, "fontsize")))
+			values := map[string]string{"name": style.Name}
+			fields := styleFieldsFor(section, style)
+			for _, field := range fields {
+				values[field.key] = styleValue(style, field.key)
+			}
+			values["name"] = style.Name
+			styles = append(styles, styleRow{name: style.Name, font: font, size: styleValue(style, "fontsize"), fields: fields, values: values})
 		}
 	}
 	undefined := 0
@@ -125,6 +157,156 @@ func styleSummary(doc *ass.Document) ([]string, []string, int) {
 	fontList := fontsSlice(fonts)
 	sort.Strings(fontList)
 	return styles, fontList, undefined
+}
+
+func printStyleTable(out io.Writer, styles []styleRow) {
+	columns := styleColumns(styles)
+	for index, group := range splitStyleColumns(columns, styles) {
+		if index > 0 {
+			fmt.Fprintln(out)
+		}
+		var rendered bytes.Buffer
+		table := tabwriter.NewWriter(&rendered, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(table, styleTableLine(group, nil))
+		for _, style := range styles {
+			fmt.Fprintln(table, styleTableLine(group, &style))
+		}
+		_ = table.Flush()
+		writeStyleTable(out, rendered.String())
+	}
+}
+
+func styleFieldsFor(section ass.Section, style ass.Style) []styleColumn {
+	var fields []string
+	if style.Line == 0 && len(section.Formats) > 0 {
+		fields = section.Formats[len(section.Formats)-1].Fields
+	}
+	for _, format := range section.Formats {
+		if format.Line > style.Line {
+			break
+		}
+		fields = format.Fields
+	}
+	result := make([]styleColumn, 0, len(fields))
+	seen := map[string]bool{}
+	for _, field := range fields {
+		label := strings.TrimSpace(field)
+		key := strings.ToLower(label)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, styleColumn{key: key, label: label})
+	}
+	return result
+}
+
+func styleColumns(styles []styleRow) []styleColumn {
+	columns := []styleColumn{{key: "name", label: "Name"}}
+	seen := map[string]bool{"name": true}
+	for _, style := range styles {
+		for _, field := range style.fields {
+			if seen[field.key] {
+				continue
+			}
+			seen[field.key] = true
+			columns = append(columns, field)
+		}
+	}
+	for _, field := range []styleColumn{{key: "fontname", label: "Fontname"}, {key: "fontsize", label: "Fontsize"}} {
+		if seen[field.key] {
+			continue
+		}
+		seen[field.key] = true
+		columns = append(columns, field)
+	}
+	return columns
+}
+
+func splitStyleColumns(columns []styleColumn, styles []styleRow) [][]styleColumn {
+	if len(columns) == 0 {
+		return nil
+	}
+	name := columns[0]
+	nameWidth := 2 + styleColumnWidth(name, styles)
+	groups := make([][]styleColumn, 0, 1)
+	current := []styleColumn{name}
+	currentWidth := nameWidth
+	for _, column := range columns[1:] {
+		columnWidth := styleColumnWidth(column, styles)
+		if len(current) > 1 && currentWidth+2+columnWidth > styleTableMaxWidth {
+			groups = append(groups, current)
+			current = []styleColumn{name}
+			currentWidth = nameWidth
+		}
+		current = append(current, column)
+		currentWidth += 2 + columnWidth
+	}
+	return append(groups, current)
+}
+
+func styleColumnWidth(column styleColumn, styles []styleRow) int {
+	width := len([]rune(styleCell(column.label)))
+	for _, style := range styles {
+		if valueWidth := len([]rune(styleCell(styleRowValue(style, column.key)))); valueWidth > width {
+			width = valueWidth
+		}
+	}
+	return width
+}
+
+func styleTableLine(columns []styleColumn, style *styleRow) string {
+	cells := make([]string, 0, len(columns))
+	for index, column := range columns {
+		value := column.label
+		if style != nil {
+			value = styleRowValue(*style, column.key)
+		}
+		value = styleCell(value)
+		if index == 0 {
+			value = "  " + value
+		}
+		cells = append(cells, value)
+	}
+	return strings.Join(cells, "\t")
+}
+
+func styleRowValue(style styleRow, key string) string {
+	value := style.values[key]
+	if value != "" {
+		return value
+	}
+	switch key {
+	case "name":
+		return style.name
+	case "fontname":
+		return style.font
+	case "fontsize":
+		return style.size
+	default:
+		return ""
+	}
+}
+
+func styleCell(value string) string {
+	value = strings.ReplaceAll(value, "\t", " ")
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	runes := []rune(value)
+	if len(runes) <= styleCellMaxWidth {
+		return value
+	}
+	return string(runes[:styleCellMaxWidth-3]) + "..."
+}
+
+func writeStyleTable(out io.Writer, rendered string) {
+	newline := strings.IndexByte(rendered, '\n')
+	if newline < 0 {
+		_, _ = io.WriteString(out, rendered)
+		return
+	}
+	_, _ = io.WriteString(out, terminal.Color(out, terminal.Bold+terminal.Cyan, rendered[:newline]))
+	_, _ = io.WriteString(out, rendered[newline:])
 }
 
 func eventSummary(doc *ass.Document) (int, int, ass.Time, ass.Time, int, int) {
