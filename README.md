@@ -45,3 +45,7 @@ go test ./...
 ```
 
 Release builds are made with `CGO_ENABLED=0`, `-trimpath`, and `-ldflags="-s -w"` for Windows, Linux, and macOS amd64/arm64 targets.
+
+## Release process
+
+Every pull request merged into `main` publishes a release. Update `VERSION` with the next `vMAJOR.MINOR.PATCH` and put the user-facing notes for that version in `RELEASE_NOTES.md`. The Release workflow validates and builds a preview on each pull request update, then creates the matching tag and GitHub Release after the pull request is merged.

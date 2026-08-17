@@ -1,24 +1,145 @@
 name: Release
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths:
+      - VERSION
+      - RELEASE_NOTES.md
+
+concurrency:
+  group: release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
-  release:
+  preview:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
       - uses: microsoft/setup-powershell@v1
-      - shell: pwsh
-        run: ./scripts/build-release.ps1 $env:GITHUB_REF_NAME
-      - uses: softprops/action-gh-release@v2
+      - name: Validate release metadata
+        id: metadata
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          if ($version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+              throw "VERSION must contain vMAJOR.MINOR.PATCH."
+          }
+
+          $notes = Get-Content -LiteralPath RELEASE_NOTES.md -Raw
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+              throw "RELEASE_NOTES.md must not be empty."
+          }
+
+          $changed = @(git diff --name-only "$env:BASE_SHA...$env:HEAD_SHA")
+          if ($changed -notcontains "VERSION") {
+              throw "Every release PR must update VERSION."
+          }
+          if ($changed -notcontains "RELEASE_NOTES.md") {
+              throw "Every release PR must update RELEASE_NOTES.md."
+          }
+
+          $currentVersion = [version]$version.Substring(1)
+          $latestTag = git tag --list "v*" |
+              Where-Object { $_ -match '^v[0-9]+\.[0-9]+\.[0-9]+$' } |
+              Sort-Object { [version]$_.Substring(1) } -Descending |
+              Select-Object -First 1
+          if ($latestTag -and $currentVersion -le [version]$latestTag.Substring(1)) {
+              throw "VERSION $version must be newer than the latest release $latestTag."
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Build release preview
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: ./scripts/build-release.ps1 $env:RELEASE_VERSION
+      - uses: actions/upload-artifact@v4
         with:
+          name: release-preview-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: microsoft/setup-powershell@v1
+      - name: Validate release metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          if ($version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+              throw "VERSION must contain vMAJOR.MINOR.PATCH."
+          }
+
+          $notes = Get-Content -LiteralPath RELEASE_NOTES.md -Raw
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+              throw "RELEASE_NOTES.md must not be empty."
+          }
+
+          $currentVersion = [version]$version.Substring(1)
+          $existingTag = git tag --list $version
+          if ($existingTag) {
+              $tagCommit = git rev-list -n 1 $version
+              if ($tagCommit -ne $env:GITHUB_SHA) {
+                  throw "VERSION $version is already tagged on another commit."
+              }
+          }
+          $latestTag = git tag --list "v*" |
+              Where-Object { $_ -match '^v[0-9]+\.[0-9]+\.[0-9]+$' } |
+              Sort-Object { [version]$_.Substring(1) } -Descending |
+              Select-Object -First 1
+          if (-not $existingTag -and $latestTag -and $currentVersion -le [version]$latestTag.Substring(1)) {
+              throw "VERSION $version must be newer than the latest release $latestTag."
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Run tests
+        run: go test ./...
+      - name: Build release
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: ./scripts/build-release.ps1 $env:RELEASE_VERSION
+      - uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.metadata.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.metadata.outputs.version }}
+          body_path: RELEASE_NOTES.md
           files: |
             dist/asst_*
             dist/SHA256SUMS
+          fail_on_unmatched_files: true

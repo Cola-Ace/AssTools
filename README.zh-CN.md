@@ -29,3 +29,7 @@ go test ./...
 ```
 
 发布脚本使用 `CGO_ENABLED=0`、`-trimpath` 和 `-ldflags="-s -w"` 构建 Windows、Linux、macOS 的 amd64/arm64 版本。
+
+## 发布流程
+
+每个合并到 `main` 的 PR 都会发布一个版本。请在 PR 中将 `VERSION` 更新为下一个 `vMAJOR.MINOR.PATCH`，并在 `RELEASE_NOTES.md` 中填写该版本面向用户的说明。Release 工作流会在 PR 每次更新时校验并构建预览产物，PR 合并后再创建对应的 tag 和 GitHub Release。
