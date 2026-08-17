@@ -29,7 +29,7 @@ Apply 1 change to "episode.ass"?
 Confirm [y/N]
 ```
 
-Exit codes are `0` for success, warnings, or cancellation; `1` for compliance errors or unresolved manual items after normalization; and `2` for usage, encoding, I/O, backup, or replacement failures. The first release handles one valid UTF-8 `.ass` file at a time. JSON, batch directories, stdin, SSA/ASS2, 32-bit targets, auto-update, signing, notarization, and package-manager distribution are intentionally out of scope.
+Exit codes: `0` = success, warnings, or cancellation; `1` = compliance errors or unresolved manual items after normalization; `2` = usage, encoding, I/O, backup, or replacement failures. The first release handles one valid UTF-8 `.ass` file at a time. JSON, batch directories, stdin, SSA/ASS2, 32-bit targets, auto-update, signing, notarization, and package-manager distribution are intentionally out of scope.
 
 ## Installation
 

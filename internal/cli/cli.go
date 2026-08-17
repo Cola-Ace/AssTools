@@ -82,7 +82,7 @@ func printHelp(out io.Writer, command string) {
 			fmt.Fprintf(out, "  %-10s %s\n", command.name, command.summary)
 		}
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, terminal.Color(out, terminal.Dim, "Exit codes: 0 success/warnings/cancel, 1 compliance findings, 2 usage or I/O failure"))
+		fmt.Fprintln(out, terminal.Color(out, terminal.Dim, "Exit codes: 0 = success, warnings, or cancellation; 1 = compliance errors or unresolved manual items; 2 = usage, encoding, I/O, backup, or replacement failures"))
 		return
 	}
 	if commandSpec, ok := commandNamed(command); ok {

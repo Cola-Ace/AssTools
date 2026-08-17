@@ -10,7 +10,7 @@ import (
 
 func TestRunHelpAndUsageErrors(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := Run(nil, strings.NewReader(""), &out, &errOut); code != 0 || !strings.Contains(out.String(), "asst - cross-platform") || !strings.Contains(out.String(), "normalize [--backup]") {
+	if code := Run(nil, strings.NewReader(""), &out, &errOut); code != 0 || !strings.Contains(out.String(), "asst - cross-platform") || !strings.Contains(out.String(), "normalize [--backup]") || !strings.Contains(out.String(), "Exit codes: 0 = success, warnings, or cancellation; 1 = compliance errors or unresolved manual items; 2 = usage, encoding, I/O, backup, or replacement failures") {
 		t.Fatalf("help failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
 	}
 	out.Reset()
