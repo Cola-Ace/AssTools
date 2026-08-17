@@ -8,6 +8,7 @@ import (
 
 	"asstools/internal/ass"
 	"asstools/internal/rules"
+	"asstools/internal/terminal"
 )
 
 func load(path, matrixMode string) (*ass.Document, rules.Result, error) {
@@ -39,13 +40,28 @@ func checkBytes(data []byte, matrixMode string) (*ass.Document, rules.Result, er
 
 func printSummary(out io.Writer, result rules.Result) {
 	status := "compliant"
+	statusStyle := terminal.Green
 	if result.ErrorCount() > 0 {
 		status = "errors found"
+		statusStyle = terminal.Red
 	} else if result.ManualCount() > 0 {
 		status = "manual review required"
+		statusStyle = terminal.Magenta
 	} else if result.WarningCount() > 0 {
 		status = "compliant with warnings"
+		statusStyle = terminal.Yellow
 	}
-	fmt.Fprintf(out, "Summary: %d errors, %d warnings, %d manual items\n", result.ErrorCount(), result.WarningCount(), result.ManualCount())
-	fmt.Fprintf(out, "Status: %s\n", status)
+	fmt.Fprintf(out, "Summary: %s, %s, %s\n",
+		colorSummaryCount(out, result.ErrorCount(), "errors", terminal.Red),
+		colorSummaryCount(out, result.WarningCount(), "warnings", terminal.Yellow),
+		colorSummaryCount(out, result.ManualCount(), "manual items", terminal.Magenta),
+	)
+	fmt.Fprintf(out, "Status: %s\n", terminal.Color(out, statusStyle, status))
+}
+
+func colorSummaryCount(out io.Writer, count int, label, style string) string {
+	if count == 0 {
+		style = terminal.Dim
+	}
+	return terminal.Color(out, style, fmt.Sprintf("%d %s", count, label))
 }

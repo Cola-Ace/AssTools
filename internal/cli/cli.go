@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"asstools/internal/terminal"
 )
 
 const (
@@ -61,25 +63,25 @@ func usageForCommand(errOut io.Writer, command, message string) int {
 }
 
 func printUsageError(out io.Writer, message string) {
-	fmt.Fprintf(out, "asst: %s\n", message)
+	fmt.Fprintln(out, terminal.Color(out, terminal.Red, fmt.Sprintf("asst: %s", message)))
 }
 
 func printHelp(out io.Writer, command string) {
 	if command == "" {
-		fmt.Fprintln(out, "asst - cross-platform ASS subtitle toolkit")
+		fmt.Fprintln(out, terminal.Color(out, terminal.Bold+terminal.Cyan, "asst - cross-platform ASS subtitle toolkit"))
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Usage:")
+		fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Usage:"))
 		for _, command := range commandRegistry() {
 			fmt.Fprintf(out, "  %s\n", command.usage)
 		}
 		fmt.Fprintln(out, "  asst help [command]")
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Commands:")
+		fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Commands:"))
 		for _, command := range commandRegistry() {
 			fmt.Fprintf(out, "  %-10s %s\n", command.name, command.summary)
 		}
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Exit codes: 0 success/warnings/cancel, 1 compliance findings, 2 usage or I/O failure")
+		fmt.Fprintln(out, terminal.Color(out, terminal.Dim, "Exit codes: 0 success/warnings/cancel, 1 compliance findings, 2 usage or I/O failure"))
 		return
 	}
 	if commandSpec, ok := commandNamed(command); ok {

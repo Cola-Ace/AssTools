@@ -12,6 +12,7 @@ import (
 
 	"asstools/internal/ass"
 	"asstools/internal/rules"
+	"asstools/internal/terminal"
 )
 
 func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int {
@@ -20,7 +21,7 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 	}
 	doc, result, err := load(path, matrixMode)
 	if err != nil {
-		fmt.Fprintf(errOut, "asst: %s\n", err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2
 	}
 	edits := append([]rules.Edit(nil), result.Edits...)
@@ -34,19 +35,19 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 	edits = mergeNormalizationEdits(uniqueEdits(edits))
 	candidate, err := doc.Source.Render(rules.ToReplacements(edits))
 	if err != nil {
-		fmt.Fprintf(errOut, "asst: cannot render normalization candidate: %s\n", err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot render normalization candidate: %s", err)))
 		return 2
 	}
 	_, candidateResult, err := checkBytes(candidate, matrixMode)
 	if err != nil {
-		fmt.Fprintf(errOut, "asst: normalization candidate is invalid: %s\n", err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalization candidate is invalid: %s", err)))
 		return 2
 	}
-	fmt.Fprintln(out, "== Normalize preview ==")
+	fmt.Fprintln(out, terminal.Color(out, terminal.Bold+terminal.Cyan, "== Normalize preview =="))
 	fmt.Fprintf(out, "Input: %q\n", path)
 	fmt.Fprintf(out, "Matrix mode: %s\n", matrixMode)
 	printMatrixDecision(out, doc, matrixMode)
-	fmt.Fprintln(out, "\nChanges:")
+	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold, "Changes:"))
 	if len(edits) == 0 {
 		fmt.Fprintln(out, "  none")
 	} else {
@@ -54,18 +55,18 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 			printEdit(out, edit)
 		}
 	}
-	fmt.Fprintln(out, "\nManual items:")
+	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Magenta, "Manual items:"))
 	manuals := manualDiagnostics(result)
 	if len(manuals) == 0 {
 		fmt.Fprintln(out, "  none")
 	} else {
 		for _, diagnostic := range manuals {
-			fmt.Fprintf(out, "  line %d [%s] %s\n", diagnostic.Line, diagnostic.Code, diagnostic.Message)
+			fmt.Fprintf(out, "  line %d [%s] %s\n", diagnostic.Line, terminal.Color(out, terminal.Magenta, diagnostic.Code), diagnostic.Message)
 		}
 	}
 
 	if len(edits) == 0 {
-		fmt.Fprintln(out, "\nNo changes required.")
+		fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Green, "No changes required."))
 		printSummary(out, candidateResult)
 		if candidateResult.ErrorCount() > 0 || candidateResult.ManualCount() > 0 {
 			return 1
@@ -74,61 +75,69 @@ func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int
 	}
 	backup := path + ".bak"
 	if _, statErr := os.Stat(backup); statErr == nil {
-		fmt.Fprintf(errOut, "asst: backup already exists: %s\n", backup)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: backup already exists: %s", backup)))
 		return 2
 	} else if !os.IsNotExist(statErr) {
-		fmt.Fprintf(errOut, "asst: cannot inspect backup path %s: %s\n", backup, statErr)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot inspect backup path %s: %s", backup, statErr)))
 		return 2
 	}
-	fmt.Fprintf(out, "\nApply %d %s to %q?\n", len(edits), plural(len(edits), "change", "changes"), path)
-	fmt.Fprintf(out, "Backup: %q [y/N] ", backup)
+	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Yellow, fmt.Sprintf("Apply %d %s to %q?", len(edits), plural(len(edits), "change", "changes"), path)))
+	fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, fmt.Sprintf("Backup: %q [y/N]", backup)))
 	reader := bufio.NewReader(in)
 	answer, readErr := reader.ReadString('\n')
 	if readErr != nil && len(answer) == 0 {
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Cancelled; no files changed.")
+		fmt.Fprintln(out, terminal.Color(out, terminal.Yellow, "Cancelled; no files changed."))
 		return 0
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	if answer != "y" && answer != "yes" {
-		fmt.Fprintln(out, "Cancelled; no files changed.")
+		fmt.Fprintln(out, terminal.Color(out, terminal.Yellow, "Cancelled; no files changed."))
 		return 0
 	}
 	current, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(errOut, "asst: cannot re-read input: %s\n", err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot re-read input: %s", err)))
 		return 2
 	}
 	if !bytes.Equal(current, doc.Source.Original) {
-		fmt.Fprintln(errOut, "asst: input changed while waiting for confirmation")
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, "asst: input changed while waiting for confirmation"))
 		return 2
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		fmt.Fprintf(errOut, "asst: cannot stat input: %s\n", err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot stat input: %s", err)))
 		return 2
 	}
 	if err := writeBackup(backup, current, info.Mode().Perm()); err != nil {
-		fmt.Fprintf(errOut, "asst: cannot write backup %s: %s\n", backup, err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot write backup %s: %s", backup, err)))
 		return 2
 	}
 	if err := replaceFile(path, candidate, info.Mode().Perm()); err != nil {
-		fmt.Fprintf(errOut, "asst: cannot replace %s: %s\n", path, err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot replace %s: %s", path, err)))
 		return 2
 	}
 	_, after, err := load(path, matrixMode)
 	if err != nil {
-		fmt.Fprintf(errOut, "asst: normalized file cannot be checked: %s\n", err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file cannot be checked: %s", err)))
 		return 2
 	}
-	fmt.Fprintf(out, "Applied %d %s.\n", len(edits), plural(len(edits), "change", "changes"))
-	fmt.Fprintf(out, "Backup written: %q\n", backup)
-	fmt.Fprintf(out, "Recheck: %d errors, %d warnings, %d manual items\n", after.ErrorCount(), after.WarningCount(), after.ManualCount())
+	fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Applied %d %s.", len(edits), plural(len(edits), "change", "changes"))))
+	fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Backup written: %q", backup)))
+	recheckStyle := terminal.Green
+	if after.ErrorCount() > 0 {
+		recheckStyle = terminal.Red
+	} else if after.ManualCount() > 0 {
+		recheckStyle = terminal.Magenta
+	} else if after.WarningCount() > 0 {
+		recheckStyle = terminal.Yellow
+	}
+	fmt.Fprintln(out, terminal.Color(out, recheckStyle, fmt.Sprintf("Recheck: %d errors, %d warnings, %d manual items", after.ErrorCount(), after.WarningCount(), after.ManualCount())))
 	if after.ErrorCount() == 0 && after.ManualCount() == 0 {
-		fmt.Fprintln(out, "Status: normalized successfully")
+		fmt.Fprintln(out, terminal.Color(out, terminal.Green, "Status: normalized successfully"))
 		return 0
 	}
-	fmt.Fprintln(out, "Status: normalized with manual items")
+	fmt.Fprintln(out, terminal.Color(out, terminal.Magenta, "Status: normalized with manual items"))
 	return 1
 }
 
@@ -160,17 +169,20 @@ func sourceFormatEdits(doc *ass.Document) []rules.Edit {
 }
 
 func printEdit(out io.Writer, edit rules.Edit) {
+	code := terminal.Color(out, terminal.Cyan, "["+edit.Code+"]")
+	before := terminal.Color(out, terminal.Red, fmt.Sprintf("%q", edit.Before))
+	after := terminal.Color(out, terminal.Green, fmt.Sprintf("%q", edit.After))
 	if edit.Start == edit.End && edit.Before == "<missing>" {
-		fmt.Fprintf(out, "  line %d  [%s] %s\n", edit.Line, edit.Code, edit.Description)
-		fmt.Fprintf(out, "    before: %q\n    after:  %q\n", edit.Before, edit.After)
+		fmt.Fprintf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description)
+		fmt.Fprintf(out, "    before: %s\n    after:  %s\n", before, after)
 		return
 	}
 	if strings.HasPrefix(edit.Before, "lines ") && edit.After == "" {
-		fmt.Fprintf(out, "  %s  [%s] %s\n", edit.Before, edit.Code, edit.Description)
+		fmt.Fprintf(out, "  %s  %s %s\n", edit.Before, code, edit.Description)
 		return
 	}
-	fmt.Fprintf(out, "  line %d  [%s] %s\n", edit.Line, edit.Code, edit.Description)
-	fmt.Fprintf(out, "    before: %q\n    after:  %q\n", edit.Before, edit.After)
+	fmt.Fprintf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description)
+	fmt.Fprintf(out, "    before: %s\n    after:  %s\n", before, after)
 }
 
 func printMatrixDecision(out io.Writer, doc *ass.Document, matrixMode string) {

@@ -9,16 +9,17 @@ import (
 
 	"asstools/internal/ass"
 	"asstools/internal/rules"
+	"asstools/internal/terminal"
 )
 
 func Info(path string, out, errOut io.Writer) int {
 	doc, result, err := load(path, "auto")
 	if err != nil {
-		fmt.Fprintf(errOut, "asst: %s\n", err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2
 	}
 	source := doc.Source
-	fmt.Fprintln(out, "== File ==")
+	fmt.Fprintln(out, terminal.Color(out, terminal.Bold+terminal.Cyan, "== File =="))
 	fmt.Fprintf(out, "Path: %q\n", path)
 	fmt.Fprintf(out, "Size: %d bytes\n", len(source.Original))
 	fmt.Fprintln(out, "Encoding: UTF-8")
@@ -27,7 +28,7 @@ func Info(path string, out, errOut io.Writer) int {
 	fmt.Fprintf(out, "Line endings: CRLF (%d), LF (%d), mixed: %s\n", crlf, lf, yesNo(source.Mixed))
 	fmt.Fprintf(out, "Trailing newline: %s\n", yesNo(source.TrailingNewline))
 
-	fmt.Fprintln(out, "\n== Structure ==")
+	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Cyan, "== Structure =="))
 	fmt.Fprintf(out, "Sections: %d\n", len(doc.Sections))
 	for _, section := range doc.Sections {
 		fmt.Fprintf(out, "  [%s] lines %d-%d\n", section.RawName, section.StartLine, section.EndLine)
@@ -52,7 +53,7 @@ func Info(path string, out, errOut io.Writer) int {
 	}
 
 	styles, fonts, undefined := styleSummary(doc)
-	fmt.Fprintln(out, "\n== Styles ==")
+	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Cyan, "== Styles =="))
 	fmt.Fprintf(out, "Definitions: %d\n", len(styles))
 	for _, style := range styles {
 		fmt.Fprintf(out, "  %s\n", style)
@@ -61,7 +62,7 @@ func Info(path string, out, errOut io.Writer) int {
 	fmt.Fprintf(out, "Undefined style references: %d\n", undefined)
 
 	dialogues, comments, earliest, latest, minLayer, maxLayer := eventSummary(doc)
-	fmt.Fprintln(out, "\n== Events ==")
+	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Cyan, "== Events =="))
 	fmt.Fprintf(out, "Dialogue: %d\n", dialogues)
 	fmt.Fprintf(out, "Comment: %d\n", comments)
 	if earliest >= 0 {
@@ -75,7 +76,7 @@ func Info(path string, out, errOut io.Writer) int {
 		fmt.Fprintln(out, "Layer range: none")
 	}
 
-	fmt.Fprintln(out, "\n== Compliance ==")
+	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Cyan, "== Compliance =="))
 	printSummary(out, result)
 	return 0
 }

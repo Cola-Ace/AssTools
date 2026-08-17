@@ -3,20 +3,28 @@ package commands
 import (
 	"fmt"
 	"io"
+
+	"asstools/internal/terminal"
 )
 
 func Check(path string, out, errOut io.Writer) int {
 	_, result, err := load(path, "auto")
 	if err != nil {
-		fmt.Fprintf(errOut, "asst: %s\n", err)
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2
 	}
 	if len(result.Diagnostics) == 0 {
-		fmt.Fprintln(out, "No diagnostics.")
+		fmt.Fprintln(out, terminal.Color(out, terminal.Green, "No diagnostics."))
 		fmt.Fprintln(out)
 	} else {
 		for _, diagnostic := range result.Diagnostics {
-			fmt.Fprintf(out, "%s:%d: %s[%s]: %s\n", path, diagnostic.Line, diagnostic.Severity, diagnostic.Code, diagnostic.Message)
+			style := terminal.Yellow
+			if diagnostic.Manual {
+				style = terminal.Magenta
+			} else if diagnostic.Severity == "error" {
+				style = terminal.Red
+			}
+			fmt.Fprintf(out, "%s:%d: %s[%s]: %s\n", path, diagnostic.Line, terminal.Color(out, style, string(diagnostic.Severity)), diagnostic.Code, diagnostic.Message)
 		}
 		fmt.Fprintln(out)
 	}
