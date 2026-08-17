@@ -1,0 +1,7 @@
+example.ass
+dist/
+coverage.out
+*.ass.bak
+.asst-*
+.gocache/
+plan/
