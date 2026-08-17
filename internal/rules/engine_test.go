@@ -86,6 +86,60 @@ Comment: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\pos(100,200}comment
 	}
 }
 
+func TestRunRepairsDeterministicOverrideSyntaxErrors(t *testing.T) {
+	data := []byte(`[Script Info]
+ScriptType: v4.00+
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+[V4+ Styles]
+Format: Name, Fontname, Fontsize
+Style: Default,Arial,20
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\fax(0.2)}fax
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\fscy150)}scale
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\move(0,0,100,100,(-269,1190))}move
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\fax(0.2)}hello\nworld
+`)
+	source, err := ass.ParseBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := ass.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := Run(doc)
+	if result.ErrorCount() != 4 {
+		t.Fatalf("expected four syntax errors, got %d: %#v", result.ErrorCount(), result.Diagnostics)
+	}
+	fixes := 0
+	for _, edit := range result.Edits {
+		if edit.Code == "override-syntax" {
+			fixes++
+		}
+	}
+	if fixes != 4 {
+		t.Fatalf("expected four safe syntax fixes, got %d: %#v", fixes, result.Edits)
+	}
+	candidate, err := source.Render(ToReplacements(result.Edits))
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateSource, err := ass.ParseBytes(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateDoc, err := ass.Parse(candidateSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after := Run(candidateDoc); after.ErrorCount() != 0 || after.WarningCount() != 0 {
+		t.Fatalf("safe syntax fixes left errors: %#v", after.Diagnostics)
+	}
+}
+
 func TestRunMarksVSFilterModTagsSeparatelyFromSyntax(t *testing.T) {
 	data := []byte(`[Script Info]
 ScriptType: v4.00+

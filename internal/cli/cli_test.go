@@ -176,3 +176,46 @@ Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\fsvp10}valid
 		t.Fatalf("check should retain VSFilterMod syntax error: code=%d out=%q err=%q", code, out.String(), errOut.String())
 	}
 }
+
+func TestNormalizeRepairsSafeOverrideSyntaxErrors(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "sample.ass")
+	data := []byte(`[Script Info]
+ScriptType: v4.00+
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+[V4+ Styles]
+Format: Name, Fontname, Fontsize
+Style: Default,Arial,20
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\fax(0.2)}fax
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\fscy150)}scale
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\move(0,0,100,100,(-269,1190))}move
+`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"normalize", "--yes", path}, strings.NewReader(""), &out, &errOut); code != 0 || errOut.Len() != 0 {
+		t.Fatalf("normalize failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "Applied 4 changes") || !strings.Contains(out.String(), "Recheck: 0 errors") {
+		t.Fatalf("normalize did not repair syntax errors: %q", out.String())
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`\fax0.2`, `\fscy150`, `\move(0,0,100,100,-269,1190)`} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("syntax repair is missing (%q): %q", want, got)
+		}
+	}
+	for _, invalid := range []string{`\fax(0.2)`, `\fscy150)`, `\move(0,0,100,100,(-269,1190))`} {
+		if strings.Contains(string(got), invalid) {
+			t.Fatalf("syntax error was not repaired (%q): %q", invalid, got)
+		}
+	}
+}

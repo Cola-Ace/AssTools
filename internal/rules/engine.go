@@ -518,9 +518,23 @@ func runOverrides(doc *ass.Document, add func(Diagnostic)) {
 			if format == nil || len(event.Values) != len(format.Fields) {
 				continue
 			}
+			syntaxRepairCount := 0
 			if event.Kind == "Dialogue" {
+				repairs := overrideSyntaxRepairs(event)
+				syntaxRepairCount = len(repairs)
 				for _, issue := range ass.ScanOverrideSyntax(event) {
-					add(Diagnostic{Line: event.Line, Severity: SeverityError, Code: "override-syntax", Message: issue})
+					var edit *Edit
+					for index := range repairs {
+						if repairs[index].message != issue || repairs[index].replacement == nil {
+							continue
+						}
+						candidate := repairs[index]
+						repairs[index].replacement = nil
+						message := fmt.Sprintf("%s (safe syntax repair)", issue)
+						edit = spanEdit(doc, candidate.span, string(candidate.replacement), "override-syntax", message)
+						break
+					}
+					add(Diagnostic{Line: event.Line, Severity: SeverityError, Code: "override-syntax", Message: issue, Edit: edit})
 				}
 			}
 			qConflict := false
@@ -567,7 +581,15 @@ func runOverrides(doc *ass.Document, add func(Diagnostic)) {
 					replacement := replaceOutsideBraces(event.Text, `\n`, `\N`)
 					if replacement != event.Text {
 						message := "lowercase \\n is normalized to \\N under WrapStyle 2"
-						add(Diagnostic{Line: event.Line, Severity: SeverityWarning, Code: "lowercase-break", Message: message, Edit: spanEdit(doc, event.TextSpan, replacement, "lowercase-break", message)})
+						if syntaxRepairCount == 0 {
+							add(Diagnostic{Line: event.Line, Severity: SeverityWarning, Code: "lowercase-break", Message: message, Edit: spanEdit(doc, event.TextSpan, replacement, "lowercase-break", message)})
+						} else {
+							for _, span := range outsideBraceSpans(event.Text, `\n`) {
+								span.Start += event.TextSpan.Start
+								span.End += event.TextSpan.Start
+								add(Diagnostic{Line: event.Line, Severity: SeverityWarning, Code: "lowercase-break", Message: message, Edit: spanEdit(doc, span, `\N`, "lowercase-break", message)})
+							}
+						}
 					}
 				}
 			}
@@ -794,6 +816,25 @@ func replaceOutsideBraces(text, from, to string) string {
 	return builder.String()
 }
 
+func outsideBraceSpans(text, value string) []ass.Span {
+	spans := make([]ass.Span, 0)
+	depth := 0
+	for index := 0; index < len(text); {
+		if text[index] == '{' {
+			depth++
+		} else if text[index] == '}' && depth > 0 {
+			depth--
+		}
+		if depth == 0 && strings.HasPrefix(text[index:], value) {
+			spans = append(spans, ass.Span{Start: index, End: index + len(value)})
+			index += len(value)
+			continue
+		}
+		index++
+	}
+	return spans
+}
+
 func suppressOverlappingEdits(edits []Edit) []Edit {
 	if len(edits) == 0 {
 		return nil
@@ -807,22 +848,50 @@ func suppressOverlappingEdits(edits []Edit) []Edit {
 	})
 	result := make([]Edit, 0, len(ordered))
 	for _, edit := range ordered {
-		suppressed := false
-		for _, kept := range result {
-			if edit.Start >= kept.Start && edit.End <= kept.End {
-				suppressed = true
-				break
+		conflicts := make([]int, 0)
+		maxPriority := 0
+		for index, kept := range result {
+			if edit.Start >= kept.End || kept.Start >= edit.End {
+				continue
 			}
-			if edit.Start < kept.End && kept.Start < edit.End {
-				suppressed = true
-				break
+			conflicts = append(conflicts, index)
+			if priority := editPriority(kept); priority > maxPriority {
+				maxPriority = priority
 			}
 		}
-		if !suppressed {
+		if len(conflicts) == 0 {
 			result = append(result, edit)
+			continue
 		}
+		if editPriority(edit) <= maxPriority {
+			continue
+		}
+		filtered := make([]Edit, 0, len(result)-len(conflicts)+1)
+		conflictSet := make(map[int]bool, len(conflicts))
+		for _, index := range conflicts {
+			conflictSet[index] = true
+		}
+		for index, kept := range result {
+			if !conflictSet[index] {
+				filtered = append(filtered, kept)
+			}
+		}
+		result = append(filtered, edit)
 	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Start != result[j].Start {
+			return result[i].Start < result[j].Start
+		}
+		return result[i].End > result[j].End
+	})
 	return result
+}
+
+func editPriority(edit Edit) int {
+	if edit.Code == "override-syntax" {
+		return 2
+	}
+	return 1
 }
 
 func latestFormat(section *ass.Section) *ass.Format {
