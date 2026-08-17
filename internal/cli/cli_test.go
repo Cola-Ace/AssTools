@@ -83,6 +83,29 @@ func TestNormalizeConfirmAppliesWithoutBackup(t *testing.T) {
 	}
 }
 
+func TestNormalizeYesAppliesWithoutConfirmation(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "sample.ass")
+	data := []byte("[Script Info]\n; generated\nScriptType: v4.00+\nWrapStyle: 2\nScaledBorderAndShadow: yes\nYCbCr Matrix: TV.709\nLayoutResX: 1920\nLayoutResY: 1080\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,hello\\n\n")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"normalize", "--yes", path}, strings.NewReader(""), &out, &errOut); code != 0 || errOut.Len() != 0 {
+		t.Fatalf("normalize --yes failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	if strings.Contains(out.String(), "Confirm [y/N]") || !strings.Contains(out.String(), "Applied ") {
+		t.Fatalf("normalize --yes should apply without prompting: %q", out.String())
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(got, data) {
+		t.Fatalf("input was not normalized: %q", got)
+	}
+}
+
 func TestNormalizeBackupOptIn(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "sample.ass")

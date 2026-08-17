@@ -7,15 +7,15 @@
 ```text
 asst info <input.ass>
 asst check [--ignore-vsfiltermod] <input.ass>
-asst normalize [--backup] [--matrix <auto|value>] <input.ass>
+asst normalize [--backup] [--yes] [--matrix <auto|value>] <input.ass>
 asst help [command]
 ```
 
-`info` 汇总文件、章节、样式、字体、事件、时间和合规状态；`check` 按 `path:line: severity[code]: message` 输出稳定诊断。检查以 libass 标签语义为准，VSFilterMod 扩展标签会单独给出 warning；`--ignore-vsfiltermod` 只隐藏这些兼容性 warning，不会隐藏其语法错误。`normalize` 先预览安全修改，确认后替换并复查结果，默认不会创建备份文件；传入 `--backup` 才会先写入与原文件逐字节一致的 `<input.ass>.bak`。
+`info` 汇总文件、章节、样式、字体、事件、时间和合规状态；`check` 按 `path:line: severity[code]: message` 输出稳定诊断。检查以 libass 标签语义为准，VSFilterMod 扩展标签会单独给出 warning；`--ignore-vsfiltermod` 只隐藏这些兼容性 warning，不会隐藏其语法错误。`normalize` 先预览安全修改，确认后替换并复查结果；传入 `--yes` 可跳过确认提示。默认不会创建备份文件；传入 `--backup` 才会先写入与原文件逐字节一致的 `<input.ass>.bak`。
 
 `auto` 会保留合法的现有 Matrix；缺失或非法时优先根据 `LayoutRes` 推断，1080p 为 `TV.709`、720p 为 `TV.601`，再回退到 `PlayRes`。显式值支持 `None`、`TV.601`、`TV.709`、`TV.240M`、`TV.FCC` 及对应的 `PC.*` 值，大小写不敏感并在预览/写回时使用规范大小写。
 
-退出码：`0` 表示成功、仅有 warning 或用户取消；`1` 表示检查发现规范错误，或规范化后仍有 manual 项；`2` 表示参数、编码、I/O、备份或替换失败。首版只处理单个有效 UTF-8 `.ass` 文件，不提供 JSON、批量目录、stdin、`--yes`、SSA/ASS2、32 位目标、自动更新、签名、公证或包管理器分发。
+退出码：`0` 表示成功、仅有 warning 或用户取消；`1` 表示检查发现规范错误，或规范化后仍有 manual 项；`2` 表示参数、编码、I/O、备份或替换失败。首版只处理单个有效 UTF-8 `.ass` 文件，不提供 JSON、批量目录、stdin、SSA/ASS2、32 位目标、自动更新、签名、公证或包管理器分发。
 
 ## 安装
 

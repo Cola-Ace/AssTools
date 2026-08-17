@@ -16,14 +16,18 @@ import (
 )
 
 func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int {
-	return normalize(path, matrixMode, false, in, out, errOut)
+	return NormalizeWithOptions(path, matrixMode, false, false, in, out, errOut)
 }
 
 func NormalizeWithBackup(path, matrixMode string, in io.Reader, out, errOut io.Writer) int {
-	return normalize(path, matrixMode, true, in, out, errOut)
+	return NormalizeWithOptions(path, matrixMode, true, false, in, out, errOut)
 }
 
-func normalize(path, matrixMode string, backupEnabled bool, in io.Reader, out, errOut io.Writer) int {
+func NormalizeWithOptions(path, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
+	return normalize(path, matrixMode, backupEnabled, skipConfirmation, in, out, errOut)
+}
+
+func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
 	if canonical, ok := rules.NormalizeMatrixValue(matrixMode); ok {
 		matrixMode = canonical
 	}
@@ -92,23 +96,25 @@ func normalize(path, matrixMode string, backupEnabled bool, in io.Reader, out, e
 			return 2
 		}
 	}
-	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Yellow, fmt.Sprintf("Apply %d %s to %s?", len(edits), plural(len(edits), "change", "changes"), formatEditValue(path))))
-	if backupEnabled {
-		fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, fmt.Sprintf("Backup: %s [y/N]", formatEditValue(backup))))
-	} else {
-		fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, "Confirm [y/N]"))
-	}
-	reader := bufio.NewReader(in)
-	answer, readErr := reader.ReadString('\n')
-	if readErr != nil && len(answer) == 0 {
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, terminal.Color(out, terminal.Yellow, "Cancelled; no files changed."))
-		return 0
-	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	if answer != "y" && answer != "yes" {
-		fmt.Fprintln(out, terminal.Color(out, terminal.Yellow, "Cancelled; no files changed."))
-		return 0
+	if !skipConfirmation {
+		fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Yellow, fmt.Sprintf("Apply %d %s to %s?", len(edits), plural(len(edits), "change", "changes"), formatEditValue(path))))
+		if backupEnabled {
+			fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, fmt.Sprintf("Backup: %s [y/N]", formatEditValue(backup))))
+		} else {
+			fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, "Confirm [y/N]"))
+		}
+		reader := bufio.NewReader(in)
+		answer, readErr := reader.ReadString('\n')
+		if readErr != nil && len(answer) == 0 {
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, terminal.Color(out, terminal.Yellow, "Cancelled; no files changed."))
+			return 0
+		}
+		answer = strings.ToLower(strings.TrimSpace(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Fprintln(out, terminal.Color(out, terminal.Yellow, "Cancelled; no files changed."))
+			return 0
+		}
 	}
 	current, err := os.ReadFile(path)
 	if err != nil {

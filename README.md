@@ -7,11 +7,11 @@
 ```text
 asst info <input.ass>
 asst check [--ignore-vsfiltermod] <input.ass>
-asst normalize [--backup] [--matrix <auto|value>] <input.ass>
+asst normalize [--backup] [--yes] [--matrix <auto|value>] <input.ass>
 asst help [command]
 ```
 
-`info` summarizes the file, sections, styles, fonts, events, timing, and compliance. `check` emits stable diagnostics in `path:line: severity[code]: message` form. Tag checking follows libass semantics; VSFilterMod extensions receive separate warnings. `--ignore-vsfiltermod` hides only those compatibility warnings, while syntax errors remain visible. `normalize` previews safe edits, asks for confirmation, then replaces the original with a rechecked candidate. It does not create a backup by default; pass `--backup` to write a byte-identical `<input.ass>.bak` first.
+`info` summarizes the file, sections, styles, fonts, events, timing, and compliance. `check` emits stable diagnostics in `path:line: severity[code]: message` form. Tag checking follows libass semantics; VSFilterMod extensions receive separate warnings. `--ignore-vsfiltermod` hides only those compatibility warnings, while syntax errors remain visible. `normalize` previews safe edits, asks for confirmation, then replaces the original with a rechecked candidate; pass `--yes` to skip the confirmation prompt. It does not create a backup by default; pass `--backup` to write a byte-identical `<input.ass>.bak` first.
 
 The default matrix mode is `auto`. It retains a legal existing value and infers `TV.709` from 1080p or `TV.601` from 720p, preferring `LayoutRes` over `PlayRes`. An explicit value accepts `None`, `TV.601`, `TV.709`, `TV.240M`, `TV.FCC`, and corresponding `PC.*` values (case-insensitive) and is shown in the preview.
 
@@ -29,7 +29,7 @@ Apply 1 change to "episode.ass"?
 Confirm [y/N]
 ```
 
-Exit codes are `0` for success, warnings, or cancellation; `1` for compliance errors or unresolved manual items after normalization; and `2` for usage, encoding, I/O, backup, or replacement failures. The first release handles one valid UTF-8 `.ass` file at a time. JSON, batch directories, stdin, non-interactive `--yes`, SSA/ASS2, 32-bit targets, auto-update, signing, notarization, and package-manager distribution are intentionally out of scope.
+Exit codes are `0` for success, warnings, or cancellation; `1` for compliance errors or unresolved manual items after normalization; and `2` for usage, encoding, I/O, backup, or replacement failures. The first release handles one valid UTF-8 `.ass` file at a time. JSON, batch directories, stdin, SSA/ASS2, 32-bit targets, auto-update, signing, notarization, and package-manager distribution are intentionally out of scope.
 
 ## Installation
 
