@@ -9,6 +9,7 @@ on:
     paths:
       - VERSION
       - RELEASE_NOTES.md
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.event.pull_request.number || github.ref }}
@@ -78,7 +79,7 @@ jobs:
           retention-days: 7
 
   release:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
