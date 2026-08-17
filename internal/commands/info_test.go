@@ -2,10 +2,13 @@ package commands
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"asstools/internal/ass"
+	"asstools/internal/rules"
 )
 
 func TestPrintStyleTableAlignsColumns(t *testing.T) {
@@ -90,5 +93,47 @@ func TestStyleSummaryUsesEachStyleFormat(t *testing.T) {
 	}
 	if got := styles[1].values["alignment"]; got != "7" {
 		t.Fatalf("modern alignment = %q", got)
+	}
+}
+
+func TestPrintComplianceDetails(t *testing.T) {
+	var out bytes.Buffer
+	printComplianceDetails(&out, rules.Result{Diagnostics: []rules.Diagnostic{
+		{Line: 2, Severity: rules.SeverityError, Code: "bad-value", Message: "value is invalid"},
+		{Line: 4, Severity: rules.SeverityWarning, Code: "style-case", Message: "style name casing differs"},
+		{Line: 6, Severity: rules.SeverityWarning, Code: "unknown-override", Message: "override requires review", Manual: true},
+	}})
+
+	want := "Details:\n" +
+		"  line 2: error[bad-value]: value is invalid\n" +
+		"  line 4: warning[style-case]: style name casing differs\n" +
+		"  line 6: warning[unknown-override] (manual): override requires review\n"
+	if got := out.String(); got != want {
+		t.Fatalf("unexpected compliance details:\n%s", got)
+	}
+}
+
+func TestPrintComplianceDetailsWhenEmpty(t *testing.T) {
+	var out bytes.Buffer
+	printComplianceDetails(&out, rules.Result{})
+	if got, want := out.String(), "Details:\n  none\n"; got != want {
+		t.Fatalf("unexpected empty compliance details: %q", got)
+	}
+}
+
+func TestInfoIncludesComplianceDetails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sample.ass")
+	if err := os.WriteFile(path, []byte("[Script Info]\n; generated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Info(path, &out, &errOut); code != 0 || errOut.Len() != 0 {
+		t.Fatalf("info failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	for _, want := range []string{"== Compliance ==", "Details:", "script-info-comment", "semicolon comment is present in Script Info"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("info output is missing %q:\n%s", want, out.String())
+		}
 	}
 }

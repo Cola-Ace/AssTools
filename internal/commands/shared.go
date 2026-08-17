@@ -59,6 +59,28 @@ func printSummary(out io.Writer, result rules.Result) {
 	fmt.Fprintf(out, "Status: %s\n", terminal.Color(out, statusStyle, status))
 }
 
+func printComplianceDetails(out io.Writer, result rules.Result) {
+	fmt.Fprintln(out, "Details:")
+	if len(result.Diagnostics) == 0 {
+		fmt.Fprintln(out, "  none")
+		return
+	}
+	for _, diagnostic := range result.Diagnostics {
+		style := terminal.Yellow
+		if diagnostic.Manual {
+			style = terminal.Magenta
+		} else if diagnostic.Severity == rules.SeverityError {
+			style = terminal.Red
+		}
+		manual := ""
+		if diagnostic.Manual {
+			manual = " (manual)"
+		}
+		severity := terminal.Color(out, style, string(diagnostic.Severity))
+		fmt.Fprintf(out, "  line %d: %s[%s]%s: %s\n", diagnostic.Line, severity, diagnostic.Code, manual, diagnostic.Message)
+	}
+}
+
 func colorSummaryCount(out io.Writer, count int, label, style string) string {
 	if count == 0 {
 		style = terminal.Dim

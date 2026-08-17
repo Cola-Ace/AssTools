@@ -77,6 +77,7 @@ func Info(path string, out, errOut io.Writer) int {
 
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Cyan, "== Compliance =="))
 	printSummary(out, result)
+	printComplianceDetails(out, result)
 	return 0
 }
 
