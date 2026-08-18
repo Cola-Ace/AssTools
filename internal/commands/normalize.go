@@ -3,17 +3,23 @@ package commands
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"asstools/internal/ass"
 	"asstools/internal/rules"
 	"asstools/internal/terminal"
 )
+
+var normalizeWriteMu sync.Mutex
+
+var errNormalizeInputChanged = errors.New("input changed during normalization")
 
 func Normalize(path, matrixMode string, in io.Reader, out, errOut io.Writer) int {
 	return NormalizeWithOptions(path, matrixMode, false, false, in, out, errOut)
@@ -114,6 +120,8 @@ func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in
 			return 0
 		}
 	}
+	normalizeWriteMu.Lock()
+	defer normalizeWriteMu.Unlock()
 	current, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot re-read input: %s", err)))
@@ -128,19 +136,60 @@ func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot stat input: %s", err)))
 		return 2
 	}
+	replacement, err := newReplacementTransaction(path, current, candidate, info.Mode().Perm())
+	if err != nil {
+		if errors.Is(err, errNormalizeInputChanged) {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, "asst: input changed before replacement"))
+		} else {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot prepare replacement for %s: %s", path, err)))
+		}
+		return 2
+	}
+	backupWritten := false
 	if backupEnabled {
 		if err := writeBackup(backup, current, info.Mode().Perm()); err != nil {
+			cleanupErr := replacement.abort()
+			if cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("cleanup failed: %w", cleanupErr))
+			}
 			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot write backup %s: %s", backup, err)))
 			return 2
 		}
+		backupWritten = true
 	}
-	if err := replaceFile(path, candidate, info.Mode().Perm()); err != nil {
+	if err := replacement.install(); err != nil {
+		cleanupErr := replacement.abort()
+		if backupWritten && !replacement.preservationFailed() {
+			if removeErr := os.Remove(backup); removeErr != nil && !os.IsNotExist(removeErr) {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove backup after failed replacement: %w", removeErr))
+			}
+		}
+		if cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("cleanup failed: %w", cleanupErr))
+		}
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot replace %s: %s", path, err)))
 		return 2
 	}
 	_, after, err := load(path, matrixMode)
+	if err == nil {
+		applied, readErr := os.ReadFile(path)
+		if readErr != nil {
+			err = readErr
+		} else if !bytes.Equal(applied, candidate) {
+			err = errNormalizeInputChanged
+		}
+	}
 	if err != nil {
-		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file cannot be checked: %s", err)))
+		rollbackErr := replacement.rollback()
+		if rollbackErr != nil {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file cannot be checked: %s; rollback failed: %s", err, rollbackErr)))
+		} else {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file cannot be checked: %s; original restored", err)))
+		}
+		return 2
+	}
+	if err := replacement.commit(); err != nil {
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file was applied but temporary cleanup failed: %s", err)))
 		return 2
 	}
 	fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Applied %d %s.", len(edits), plural(len(edits), "change", "changes"))))
@@ -308,70 +357,258 @@ func manualDiagnostics(result rules.Result) []rules.Diagnostic {
 }
 
 func writeBackup(path string, data []byte, mode os.FileMode) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	directory := filepath.Dir(path)
+	base := filepath.Base(path)
+	tempPath, err := writeTempFile(directory, "."+base+".asst-backup-*", data, mode)
 	if err != nil {
 		return err
 	}
-	ok := false
+	keepTemp := true
 	defer func() {
-		if !ok {
-			_ = file.Close()
+		if keepTemp {
+			_ = os.Remove(tempPath)
 		}
 	}()
-	if _, err := file.Write(data); err != nil {
+	if err := os.Link(tempPath, path); err != nil {
 		return err
 	}
-	if err := file.Sync(); err != nil {
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	ok = true
+	keepTemp = false
+	_ = os.Remove(tempPath)
 	return nil
 }
 
 func replaceFile(path string, data []byte, mode os.FileMode) error {
-	directory := filepath.Dir(path)
-	base := filepath.Base(path)
-	temp, err := os.CreateTemp(directory, "."+base+".asst-*")
+	original, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	tempPath := temp.Name()
-	defer func() {
-		_ = os.Remove(tempPath)
-	}()
-	if err := temp.Chmod(mode); err != nil {
-		_ = temp.Close()
+	replacement, err := newReplacementTransaction(path, original, data, mode)
+	if err != nil {
 		return err
 	}
-	if _, err := temp.Write(data); err != nil {
-		_ = temp.Close()
+	if err := replacement.install(); err != nil {
+		return errors.Join(err, replacement.abort())
+	}
+	return replacement.commit()
+}
+
+type replacementTransaction struct {
+	path          string
+	candidatePath string
+	rollbackPath  string
+	cleanupPath   string
+	expected      []byte
+	installed     bool
+	keepRollback  bool
+}
+
+func newReplacementTransaction(path string, expected, data []byte, mode os.FileMode) (*replacementTransaction, error) {
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(current, expected) {
+		return nil, errNormalizeInputChanged
+	}
+	directory := filepath.Dir(path)
+	base := filepath.Base(path)
+	candidatePath, err := writeTempFile(directory, "."+base+".asst-candidate-*", data, mode)
+	if err != nil {
+		return nil, err
+	}
+	rollbackPath, err := writeTempFile(directory, "."+base+".asst-original-*", expected, mode)
+	if err != nil {
+		_ = os.Remove(candidatePath)
+		return nil, err
+	}
+	latest, err := os.ReadFile(path)
+	if err != nil {
+		_ = os.Remove(candidatePath)
+		_ = os.Remove(rollbackPath)
+		return nil, err
+	}
+	if !bytes.Equal(latest, expected) {
+		_ = os.Remove(candidatePath)
+		_ = os.Remove(rollbackPath)
+		return nil, errNormalizeInputChanged
+	}
+	return &replacementTransaction{
+		path:          path,
+		candidatePath: candidatePath,
+		rollbackPath:  rollbackPath,
+		expected:      append([]byte(nil), expected...),
+	}, nil
+}
+
+func (replacement *replacementTransaction) install() error {
+	current, err := os.ReadFile(replacement.path)
+	if err != nil {
 		return err
 	}
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
-		return err
+	if !bytes.Equal(current, replacement.expected) {
+		return errNormalizeInputChanged
 	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tempPath, path); err == nil {
+	renameErr := os.Rename(replacement.candidatePath, replacement.path)
+	if renameErr == nil {
+		replacement.candidatePath = ""
+		replacement.installed = true
 		return nil
 	}
-	original, readErr := os.ReadFile(path)
-	if readErr != nil {
-		return readErr
+	displacedPath, err := newTempPath(filepath.Dir(replacement.path), "."+filepath.Base(replacement.path)+".asst-displaced-*")
+	if err != nil {
+		return errors.Join(renameErr, fmt.Errorf("prepare fallback replacement: %w", err))
 	}
-	if err := os.Remove(path); err != nil {
-		return err
+	if err := os.Rename(replacement.path, displacedPath); err != nil {
+		_ = os.Remove(displacedPath)
+		return errors.Join(renameErr, fmt.Errorf("preserve original before fallback replacement: %w", err))
 	}
-	if err := os.Rename(tempPath, path); err != nil {
-		_ = os.WriteFile(path, original, mode)
-		return err
+	if err := os.Rename(replacement.candidatePath, replacement.path); err != nil {
+		replacement.keepRollback = true
+		replacement.cleanupPath = displacedPath
+		restoreErr := restoreFromTemp(displacedPath, replacement.path)
+		if restoreErr == nil {
+			replacement.keepRollback = false
+			replacement.cleanupPath = ""
+		}
+		return errors.Join(renameErr, err, restoreErr)
 	}
+	replacement.candidatePath = ""
+	replacement.installed = true
+	replacement.cleanupPath = replacement.rollbackPath
+	replacement.rollbackPath = displacedPath
 	return nil
+}
+
+func (replacement *replacementTransaction) rollback() error {
+	if !replacement.installed {
+		return replacement.abort()
+	}
+	if err := restoreFromTemp(replacement.rollbackPath, replacement.path); err != nil {
+		replacement.keepRollback = true
+		return err
+	}
+	replacement.installed = false
+	replacement.rollbackPath = ""
+	return replacement.cleanup()
+}
+
+func (replacement *replacementTransaction) commit() error {
+	if !replacement.installed {
+		return fmt.Errorf("replacement is not installed")
+	}
+	replacement.installed = false
+	return replacement.cleanup()
+}
+
+func (replacement *replacementTransaction) abort() error {
+	if replacement.keepRollback {
+		preservedPath := replacement.cleanupPath
+		if preservedPath == "" {
+			preservedPath = replacement.rollbackPath
+		}
+		return fmt.Errorf("original preserved at %s", preservedPath)
+	}
+	return replacement.cleanup()
+}
+
+func (replacement *replacementTransaction) cleanup() error {
+	var cleanupErr error
+	paths := []*string{&replacement.candidatePath, &replacement.rollbackPath, &replacement.cleanupPath}
+	for _, path := range paths {
+		if *path == "" {
+			continue
+		}
+		if err := os.Remove(*path); err != nil && !os.IsNotExist(err) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove temporary file %s: %w", *path, err))
+			continue
+		}
+		*path = ""
+	}
+	return cleanupErr
+}
+
+func (replacement *replacementTransaction) preservationFailed() bool {
+	return replacement.keepRollback
+}
+
+func writeTempFile(directory, pattern string, data []byte, mode os.FileMode) (string, error) {
+	temp, err := os.CreateTemp(directory, pattern)
+	if err != nil {
+		return "", err
+	}
+	tempPath := temp.Name()
+	keepTemp := true
+	defer func() {
+		if keepTemp {
+			_ = temp.Close()
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err := temp.Chmod(mode); err != nil {
+		return "", err
+	}
+	if err := writeAndSync(temp, data); err != nil {
+		return "", err
+	}
+	if err := temp.Close(); err != nil {
+		return "", err
+	}
+	keepTemp = false
+	return tempPath, nil
+}
+
+func writeAndSync(file *os.File, data []byte) error {
+	written, err := file.Write(data)
+	if err != nil {
+		return err
+	}
+	if written != len(data) {
+		return io.ErrShortWrite
+	}
+	return file.Sync()
+}
+
+func newTempPath(directory, pattern string) (string, error) {
+	temp, err := os.CreateTemp(directory, pattern)
+	if err != nil {
+		return "", err
+	}
+	tempPath := temp.Name()
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return "", err
+	}
+	if err := os.Remove(tempPath); err != nil {
+		return "", err
+	}
+	return tempPath, nil
+}
+
+func restoreFromTemp(sourcePath, destinationPath string) error {
+	if err := os.Rename(sourcePath, destinationPath); err == nil {
+		return nil
+	} else {
+		firstErr := err
+		currentPath, tempErr := newTempPath(filepath.Dir(destinationPath), "."+filepath.Base(destinationPath)+".asst-current-*")
+		if tempErr != nil {
+			return errors.Join(firstErr, fmt.Errorf("prepare restoration: %w", tempErr))
+		}
+		if err := os.Rename(destinationPath, currentPath); err != nil {
+			_ = os.Remove(currentPath)
+			return errors.Join(firstErr, fmt.Errorf("preserve replaced file during restoration: %w", err))
+		}
+		if err := os.Rename(sourcePath, destinationPath); err != nil {
+			restoreCurrentErr := os.Rename(currentPath, destinationPath)
+			if restoreCurrentErr != nil {
+				return errors.Join(firstErr, fmt.Errorf("restore original: %w", err), fmt.Errorf("restore replaced file: %w", restoreCurrentErr))
+			}
+			return errors.Join(firstErr, fmt.Errorf("restore original: %w", err))
+		}
+		if err := os.Remove(currentPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove replaced file after restoration: %w", err)
+		}
+		return nil
+	}
 }
 
 func plural(count int, singular, plural string) string {
