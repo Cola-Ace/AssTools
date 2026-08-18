@@ -29,6 +29,27 @@ func TestRunHelpAndUsageErrors(t *testing.T) {
 	}
 }
 
+func TestRunCommandHelpIsCaseInsensitive(t *testing.T) {
+	for _, command := range []string{"info", "check", "normalize"} {
+		for _, name := range []string{command, strings.ToUpper(command)} {
+			for _, flag := range []string{"-h", "--help"} {
+				var out, errOut bytes.Buffer
+				if code := Run([]string{name, flag}, strings.NewReader(""), &out, &errOut); code != ExitOK {
+					t.Fatalf("%s %s failed: code=%d out=%q err=%q", name, flag, code, out.String(), errOut.String())
+				}
+				if !strings.Contains(out.String(), "Usage: asst "+command) || errOut.Len() != 0 {
+					t.Fatalf("%s %s printed unexpected help: out=%q err=%q", name, flag, out.String(), errOut.String())
+				}
+			}
+		}
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"help", "INFO"}, strings.NewReader(""), &out, &errOut); code != ExitOK || !strings.Contains(out.String(), "Usage: asst info") || errOut.Len() != 0 {
+		t.Fatalf("help INFO failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+}
+
 func TestNormalizeCancelDoesNotWrite(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "sample.ass")

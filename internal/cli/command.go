@@ -42,17 +42,16 @@ func commandRegistry() []commandSpec {
 }
 
 func commandFor(name string) (commandHandler, bool) {
-	for _, command := range commandRegistry() {
-		if command.name == strings.ToLower(name) {
-			return command.handler, true
-		}
+	command, ok := commandNamed(name)
+	if ok {
+		return command.handler, true
 	}
 	return nil, false
 }
 
 func commandNamed(name string) (commandSpec, bool) {
 	for _, command := range commandRegistry() {
-		if command.name == name {
+		if strings.EqualFold(command.name, name) {
 			return command, true
 		}
 	}

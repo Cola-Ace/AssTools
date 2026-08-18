@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"asstools/internal/commands"
+	"asstools/internal/rules"
 	"asstools/internal/terminal"
 )
 
@@ -47,23 +48,16 @@ func runNormalize(args []string, in io.Reader, out, errOut io.Writer) int {
 	if path == "" {
 		return usageForCommand(errOut, "normalize", "normalize requires one .ass file")
 	}
-	if !strings.EqualFold(matrix, "auto") {
-		if _, ok := canonicalMatrix(matrix); !ok {
-			return usageForCommand(errOut, "normalize", fmt.Sprintf("invalid matrix value %q", matrix))
-		}
-	} else {
-		matrix = "auto"
+	canonical, ok := canonicalMatrix(matrix)
+	if !ok {
+		return usageForCommand(errOut, "normalize", fmt.Sprintf("invalid matrix value %q", matrix))
 	}
+	matrix = canonical
 	return commands.NormalizeWithOptions(path, matrix, backup, skipConfirmation, in, out, errOut)
 }
 
 func canonicalMatrix(value string) (string, bool) {
-	values := map[string]string{
-		"none": "None", "tv.601": "TV.601", "tv.709": "TV.709", "tv.240m": "TV.240M", "tv.fcc": "TV.FCC",
-		"pc.601": "PC.601", "pc.709": "PC.709", "pc.240m": "PC.240M", "pc.fcc": "PC.FCC",
-	}
-	canonical, ok := values[strings.ToLower(strings.TrimSpace(value))]
-	return canonical, ok
+	return rules.NormalizeMatrixValue(value)
 }
 
 func printNormalizeHelp(out io.Writer) {

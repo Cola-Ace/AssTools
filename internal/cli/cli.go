@@ -48,8 +48,12 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) int {
 		printHelp(out, command)
 		return ExitOK
 	}
-	if handler, ok := commandFor(args[0]); ok {
-		return handler(args[1:], in, out, errOut)
+	if command, ok := commandNamed(args[0]); ok {
+		if len(args) == 2 && (args[1] == "-h" || args[1] == "--help") {
+			command.help(out)
+			return ExitOK
+		}
+		return command.handler(args[1:], in, out, errOut)
 	}
 	printUsageError(errOut, fmt.Sprintf("unknown command %q", args[0]))
 	printHelp(errOut, "")

@@ -30,7 +30,12 @@ func NormalizeWithBackup(path, matrixMode string, in io.Reader, out, errOut io.W
 }
 
 func NormalizeWithOptions(path, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
-	return normalize(path, matrixMode, backupEnabled, skipConfirmation, in, out, errOut)
+	canonical, ok := rules.NormalizeMatrixValue(matrixMode)
+	if !ok {
+		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: invalid matrix value %q", matrixMode)))
+		return 2
+	}
+	return normalize(path, canonical, backupEnabled, skipConfirmation, in, out, errOut)
 }
 
 func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
