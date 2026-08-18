@@ -39,6 +39,8 @@ func NormalizeWithOptions(path, matrixMode string, backupEnabled, skipConfirmati
 }
 
 func NormalizeWithOutput(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) (code int) {
+	path = cleanPath(path)
+	outputPath = cleanPath(outputPath)
 	trackedOut := output.Track(out)
 	trackedErrOut := output.Track(errOut)
 	out = trackedOut

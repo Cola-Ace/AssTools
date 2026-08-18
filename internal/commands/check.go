@@ -18,6 +18,7 @@ func CheckReader(path string, in io.Reader, out, errOut io.Writer, ignoreVSFilte
 }
 
 func check(path string, in io.Reader, out, errOut io.Writer, ignoreVSFilterModWarnings ...bool) (code int) {
+	path = cleanPath(path)
 	trackedOut := output.Track(out)
 	trackedErrOut := output.Track(errOut)
 	out = trackedOut

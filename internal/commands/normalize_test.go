@@ -71,6 +71,19 @@ func TestFormatEditValueKeepsPathBackslashesReadable(t *testing.T) {
 	}
 }
 
+func TestCleanPathRemovesCurrentDirectoryPrefix(t *testing.T) {
+	for input, want := range map[string]string{
+		"./sample.ass":   "sample.ass",
+		`.\sample.ass`:   "sample.ass",
+		"././sample.ass": "sample.ass",
+		"sample.ass":     "sample.ass",
+	} {
+		if got := cleanPath(input); got != want {
+			t.Errorf("cleanPath(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestNormalizeWithOptionsRejectsInvalidMatrixBeforeLoading(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "sample.ass")

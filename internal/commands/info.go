@@ -31,6 +31,7 @@ func InfoReaderWithOptions(path string, in io.Reader, strict bool, out, errOut i
 }
 
 func info(path string, in io.Reader, strict bool, out, errOut io.Writer) (code int) {
+	path = cleanPath(path)
 	trackedOut := output.Track(out)
 	trackedErrOut := output.Track(errOut)
 	out = trackedOut

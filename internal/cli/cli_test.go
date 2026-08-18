@@ -78,6 +78,24 @@ func TestNormalizeCancelDoesNotWrite(t *testing.T) {
 	}
 }
 
+func TestInfoRemovesCurrentDirectoryPrefix(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.WriteFile("sample.ass", []byte("[Script Info]\n; generated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, input := range []string{"./sample.ass", `.\sample.ass`} {
+		var out, errOut bytes.Buffer
+		if code := Run([]string{"info", input}, strings.NewReader(""), &out, &errOut); code != 0 || errOut.Len() != 0 {
+			t.Fatalf("info %q failed: code=%d out=%q err=%q", input, code, out.String(), errOut.String())
+		}
+		if !strings.Contains(out.String(), `Path: "sample.ass"`) || strings.Contains(out.String(), input) {
+			t.Fatalf("info did not clean current-directory prefix %q: %q", input, out.String())
+		}
+	}
+}
+
 func TestNormalizeConfirmAppliesWithoutBackup(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "sample.ass")

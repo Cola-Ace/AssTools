@@ -12,6 +12,7 @@ import (
 )
 
 func load(path, matrixMode string) (*ass.Document, rules.Result, error) {
+	path = cleanPath(path)
 	if !strings.EqualFold(filepath.Ext(path), ".ass") {
 		return nil, rules.Result{}, fmt.Errorf("input must have a .ass extension")
 	}
@@ -24,6 +25,19 @@ func load(path, matrixMode string) (*ass.Document, rules.Result, error) {
 		return nil, rules.Result{}, err
 	}
 	return doc, rules.Run(doc, matrixMode), nil
+}
+
+func cleanPath(path string) string {
+	if path == "" || path == "-" {
+		return path
+	}
+	if strings.HasPrefix(path, `.\`) {
+		path = "./" + path[2:]
+	}
+	if strings.HasPrefix(path, "./") {
+		return filepath.Clean(path)
+	}
+	return path
 }
 
 func loadReader(in io.Reader, matrixMode string) (*ass.Document, rules.Result, error) {
