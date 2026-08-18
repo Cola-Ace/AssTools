@@ -12,6 +12,7 @@ import (
 )
 
 func load(path, matrixMode string) (*ass.Document, rules.Result, error) {
+	path = cleanPath(path)
 	if !strings.EqualFold(filepath.Ext(path), ".ass") {
 		return nil, rules.Result{}, fmt.Errorf("input must have a .ass extension")
 	}
@@ -26,6 +27,27 @@ func load(path, matrixMode string) (*ass.Document, rules.Result, error) {
 	return doc, rules.Run(doc, matrixMode), nil
 }
 
+func cleanPath(path string) string {
+	if path == "" || path == "-" {
+		return path
+	}
+	if strings.HasPrefix(path, `.\`) {
+		path = "./" + path[2:]
+	}
+	if strings.HasPrefix(path, "./") {
+		return filepath.Clean(path)
+	}
+	return path
+}
+
+func loadReader(in io.Reader, matrixMode string) (*ass.Document, rules.Result, error) {
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return nil, rules.Result{}, err
+	}
+	return checkBytes(data, matrixMode)
+}
+
 func checkBytes(data []byte, matrixMode string) (*ass.Document, rules.Result, error) {
 	source, err := ass.ParseBytes(data)
 	if err != nil {
@@ -38,7 +60,7 @@ func checkBytes(data []byte, matrixMode string) (*ass.Document, rules.Result, er
 	return doc, rules.Run(doc, matrixMode), nil
 }
 
-func printSummary(out io.Writer, result rules.Result) {
+func printSummary(out io.Writer, result rules.Result) error {
 	status := "compliant"
 	statusStyle := terminal.Green
 	if result.ErrorCount() > 0 {
@@ -51,19 +73,22 @@ func printSummary(out io.Writer, result rules.Result) {
 		status = "compliant with warnings"
 		statusStyle = terminal.Yellow
 	}
-	fmt.Fprintf(out, "Summary: %s, %s, %s\n",
+	if err := writeOutputf(out, "Summary: %s, %s, %s\n",
 		colorSummaryCount(out, result.ErrorCount(), "errors", terminal.Red),
 		colorSummaryCount(out, result.WarningCount(), "warnings", terminal.Yellow),
 		colorSummaryCount(out, result.ManualCount(), "manual items", terminal.Magenta),
-	)
-	fmt.Fprintf(out, "Status: %s\n", terminal.Color(out, statusStyle, status))
+	); err != nil {
+		return err
+	}
+	return writeOutputf(out, "Status: %s\n", terminal.Color(out, statusStyle, status))
 }
 
-func printComplianceDetails(out io.Writer, result rules.Result) {
-	fmt.Fprintln(out, "Details:")
+func printComplianceDetails(out io.Writer, result rules.Result) error {
+	if err := writeOutputln(out, "Details:"); err != nil {
+		return err
+	}
 	if len(result.Diagnostics) == 0 {
-		fmt.Fprintln(out, "  none")
-		return
+		return writeOutputln(out, "  none")
 	}
 	for _, diagnostic := range result.Diagnostics {
 		style := terminal.Yellow
@@ -77,8 +102,27 @@ func printComplianceDetails(out io.Writer, result rules.Result) {
 			manual = " (manual)"
 		}
 		severity := terminal.Color(out, style, string(diagnostic.Severity))
-		fmt.Fprintf(out, "  line %d: %s[%s]%s: %s\n", diagnostic.Line, severity, diagnostic.Code, manual, diagnostic.Message)
+		if err := writeOutputf(out, "  line %d: %s[%s]%s: %s\n", diagnostic.Line, severity, diagnostic.Code, manual, diagnostic.Message); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+func writeOutput(out io.Writer, value string) error {
+	written, err := io.WriteString(out, value)
+	if err == nil && written != len(value) {
+		return io.ErrShortWrite
+	}
+	return err
+}
+
+func writeOutputf(out io.Writer, format string, values ...interface{}) error {
+	return writeOutput(out, fmt.Sprintf(format, values...))
+}
+
+func writeOutputln(out io.Writer, values ...interface{}) error {
+	return writeOutput(out, fmt.Sprintln(values...))
 }
 
 func colorSummaryCount(out io.Writer, count int, label, style string) string {

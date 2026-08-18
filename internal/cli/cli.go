@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"asstools/internal/output"
 	"asstools/internal/terminal"
 )
 
@@ -14,7 +15,16 @@ const (
 	ExitUsage = 2
 )
 
-func Run(args []string, in io.Reader, out, errOut io.Writer) int {
+func Run(args []string, in io.Reader, out, errOut io.Writer) (code int) {
+	trackedOut := output.Track(out)
+	trackedErrOut := output.Track(errOut)
+	out = trackedOut
+	errOut = trackedErrOut
+	defer func() {
+		if trackedOut.Err() != nil || trackedErrOut.Err() != nil {
+			code = ExitUsage
+		}
+	}()
 	if len(args) == 0 {
 		printHelp(out, "")
 		return ExitOK
@@ -48,8 +58,12 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) int {
 		printHelp(out, command)
 		return ExitOK
 	}
-	if handler, ok := commandFor(args[0]); ok {
-		return handler(args[1:], in, out, errOut)
+	if command, ok := commandNamed(args[0]); ok {
+		if len(args) == 2 && (args[1] == "-h" || args[1] == "--help") {
+			command.help(out)
+			return ExitOK
+		}
+		return command.handler(args[1:], in, out, errOut)
 	}
 	printUsageError(errOut, fmt.Sprintf("unknown command %q", args[0]))
 	printHelp(errOut, "")
@@ -82,7 +96,7 @@ func printHelp(out io.Writer, command string) {
 			fmt.Fprintf(out, "  %-10s %s\n", command.name, command.summary)
 		}
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, terminal.Color(out, terminal.Dim, "Exit codes: 0 = success, warnings, or cancellation; 1 = compliance errors or unresolved manual items; 2 = usage, encoding, I/O, backup, or replacement failures"))
+		fmt.Fprintln(out, terminal.Color(out, terminal.Dim, "Exit codes: 0 = success, warnings, cancellation, or non-strict info findings; 1 = compliance errors, unresolved manual items, or strict info findings; 2 = usage, encoding, I/O, backup, or replacement failures"))
 		return
 	}
 	if commandSpec, ok := commandNamed(command); ok {

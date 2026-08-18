@@ -2,6 +2,9 @@ package commands
 
 import (
 	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -65,5 +68,130 @@ func TestFormatEditValueEscapesLineBreaksWithoutDoublingBackslashes(t *testing.T
 func TestFormatEditValueKeepsPathBackslashesReadable(t *testing.T) {
 	if got, want := formatEditValue(`D:\work\episode.ass`), `"D:\work\episode.ass"`; got != want {
 		t.Fatalf("formatEditValue() = %q, want %q", got, want)
+	}
+}
+
+func TestCleanPathRemovesCurrentDirectoryPrefix(t *testing.T) {
+	for input, want := range map[string]string{
+		"./sample.ass":   "sample.ass",
+		`.\sample.ass`:   "sample.ass",
+		"././sample.ass": "sample.ass",
+		"sample.ass":     "sample.ass",
+	} {
+		if got := cleanPath(input); got != want {
+			t.Errorf("cleanPath(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestNormalizeWithOptionsRejectsInvalidMatrixBeforeLoading(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "sample.ass")
+	original := []byte("original")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := NormalizeWithOptions(path, "bad", false, true, strings.NewReader(""), &out, &errOut); code != 2 {
+		t.Fatalf("invalid matrix returned code %d, want 2; out=%q err=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), `asst: invalid matrix value "bad"`) {
+		t.Fatalf("invalid matrix error = %q", errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("invalid matrix produced output: %q", out.String())
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("invalid matrix changed input: %q", got)
+	}
+}
+
+func TestReplacementTransactionRollsBackAfterRecheckFailure(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "sample.ass")
+	original := []byte("original")
+	candidate := []byte("candidate")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := newReplacementTransaction(path, original, candidate, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := replacement.install(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := replacement.rollback(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("rollback restored %q, want %q", got, original)
+	}
+}
+
+func TestReplacementTransactionRejectsChangedInputBeforeInstall(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "sample.ass")
+	original := []byte("original")
+	changed := []byte("changed")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := newReplacementTransaction(path, original, []byte("candidate"), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, changed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := replacement.install(); !errors.Is(err, errNormalizeInputChanged) {
+		t.Fatalf("install error = %v, want input-changed error", err)
+	}
+	if err := replacement.abort(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, changed) {
+		t.Fatalf("changed input was overwritten: %q", got)
+	}
+}
+
+func TestWriteBackupDoesNotOverwriteExistingBackup(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "sample.ass.bak")
+	original := []byte("existing backup")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeBackup(path, []byte("new backup"), 0o644); err == nil {
+		t.Fatal("writeBackup unexpectedly overwrote an existing backup")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("existing backup changed: %q", got)
+	}
+	temporary, err := filepath.Glob(filepath.Join(directory, ".sample.ass.bak.asst-backup-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temporary) != 0 {
+		t.Fatalf("failed backup left temporary files: %v", temporary)
 	}
 }

@@ -19,21 +19,21 @@ func commandRegistry() []commandSpec {
 	return []commandSpec{
 		{
 			name:    "info",
-			usage:   "asst info <input.ass>",
+			usage:   "asst info [--strict] [-|--input|<input.ass>]",
 			summary: "summarize structure, timing, fonts, and compliance",
 			handler: runInfo,
 			help:    printInfoHelp,
 		},
 		{
 			name:    "check",
-			usage:   "asst check [--ignore-vsfiltermod] <input.ass>",
+			usage:   "asst check [--ignore-vsfiltermod] [-|--input|<input.ass>]",
 			summary: "print stable compliance diagnostics",
 			handler: runCheck,
 			help:    printCheckHelp,
 		},
 		{
 			name:    "normalize",
-			usage:   "asst normalize [--backup] [--yes] [--matrix <auto|value>] <input.ass>",
+			usage:   "asst normalize [--backup] [--output <path>] [--yes] [--matrix <auto|value>] <input.ass>",
 			summary: "preview safe edits, then optionally apply them",
 			handler: runNormalize,
 			help:    printNormalizeHelp,
@@ -42,17 +42,16 @@ func commandRegistry() []commandSpec {
 }
 
 func commandFor(name string) (commandHandler, bool) {
-	for _, command := range commandRegistry() {
-		if command.name == strings.ToLower(name) {
-			return command.handler, true
-		}
+	command, ok := commandNamed(name)
+	if ok {
+		return command.handler, true
 	}
 	return nil, false
 }
 
 func commandNamed(name string) (commandSpec, bool) {
 	for _, command := range commandRegistry() {
-		if command.name == name {
+		if strings.EqualFold(command.name, name) {
 			return command, true
 		}
 	}

@@ -180,14 +180,20 @@ func runStructure(doc *ass.Document, add func(Diagnostic)) {
 			add(Diagnostic{Line: section.HeaderLine, Severity: SeverityError, Code: "events-format-missing", Message: message, Edit: formatInsertionEdit(doc, &section, "events", message)})
 		}
 	}
+	sectionsByLine := make(map[int][]int)
+	for index, section := range doc.Sections {
+		if section.Kind != ass.SectionScriptInfo {
+			continue
+		}
+		for lineNumber := section.StartLine; lineNumber <= section.EndLine; lineNumber++ {
+			sectionsByLine[lineNumber] = append(sectionsByLine[lineNumber], index)
+		}
+	}
 	for _, line := range doc.Source.Lines {
 		if len(bytes.TrimSpace(line.Content)) == 0 {
 			continue
 		}
-		for _, section := range doc.Sections {
-			if section.Kind != ass.SectionScriptInfo || line.Number < section.StartLine || line.Number > section.EndLine {
-				continue
-			}
+		for range sectionsByLine[line.Number] {
 			trimmed := strings.TrimSpace(string(line.Content))
 			if strings.HasPrefix(trimmed, ";") {
 				message := "semicolon comment is present in Script Info"

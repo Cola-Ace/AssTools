@@ -48,6 +48,34 @@ func TestRunFindsExampleSafeEdits(t *testing.T) {
 	}
 }
 
+func TestRunFindsScriptInfoCommentsAcrossSections(t *testing.T) {
+	data := []byte("[Script Info]\n" +
+		"; first comment\n" +
+		"[Unknown]\n" +
+		"value\n" +
+		"[Script Info]\n" +
+		"; second comment\n")
+	source, err := ass.ParseBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := ass.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := Run(doc)
+	lines := make([]int, 0, 2)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "script-info-comment" {
+			lines = append(lines, diagnostic.Line)
+		}
+	}
+	if len(lines) != 2 || lines[0] != 2 || lines[1] != 6 {
+		t.Fatalf("unexpected Script Info comment lines: %v", lines)
+	}
+}
+
 func TestRunChecksDialogueOverrideSyntax(t *testing.T) {
 	data := []byte(`[Script Info]
 ScriptType: v4.00+

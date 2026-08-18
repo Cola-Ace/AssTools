@@ -9,13 +9,21 @@ import (
 	"asstools/internal/terminal"
 )
 
-func runCheck(args []string, _ io.Reader, out, errOut io.Writer) int {
+func runCheck(args []string, in io.Reader, out, errOut io.Writer) int {
 	ignoreVSFilterMod := false
 	path := ""
+	stdin := false
 	for _, arg := range args {
 		switch arg {
 		case "--ignore-vsfiltermod", "--ignore-vsfiltermod-warning", "--ignore-vsfiltermod-warnings":
 			ignoreVSFilterMod = true
+			continue
+		case "-", "--input":
+			if path != "" {
+				return usageForCommand(errOut, "check", "check accepts one .ass file or --input")
+			}
+			path = "-"
+			stdin = true
 			continue
 		}
 		if strings.HasPrefix(arg, "-") {
@@ -29,12 +37,16 @@ func runCheck(args []string, _ io.Reader, out, errOut io.Writer) int {
 	if path == "" {
 		return usageForCommand(errOut, "check", "check requires exactly one .ass file")
 	}
+	if stdin {
+		return commands.CheckReader("-", in, out, errOut, ignoreVSFilterMod)
+	}
 	return commands.Check(path, out, errOut, ignoreVSFilterMod)
 }
 
 func printCheckHelp(out io.Writer) {
-	fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Usage: asst check [--ignore-vsfiltermod] <input.ass>"))
+	fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Usage: asst check [--ignore-vsfiltermod] [-|--input|<input.ass>]"))
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Print diagnostics as path:line: severity[code]: message.")
 	fmt.Fprintln(out, "Use --ignore-vsfiltermod to hide VSFilterMod compatibility warnings; syntax errors remain visible.")
+	fmt.Fprintln(out, "Use - or --input to read ASS data from standard input.")
 }

@@ -9,12 +9,46 @@ import (
 	"text/tabwriter"
 
 	"asstools/internal/ass"
+	"asstools/internal/output"
 	"asstools/internal/rules"
 	"asstools/internal/terminal"
 )
 
 func Info(path string, out, errOut io.Writer) int {
-	doc, result, err := load(path, "auto")
+	return info(path, nil, false, out, errOut)
+}
+
+func InfoWithOptions(path string, strict bool, out, errOut io.Writer) int {
+	return info(path, nil, strict, out, errOut)
+}
+
+func InfoReader(path string, in io.Reader, out, errOut io.Writer) int {
+	return info(path, in, false, out, errOut)
+}
+
+func InfoReaderWithOptions(path string, in io.Reader, strict bool, out, errOut io.Writer) int {
+	return info(path, in, strict, out, errOut)
+}
+
+func info(path string, in io.Reader, strict bool, out, errOut io.Writer) (code int) {
+	path = cleanPath(path)
+	trackedOut := output.Track(out)
+	trackedErrOut := output.Track(errOut)
+	out = trackedOut
+	errOut = trackedErrOut
+	defer func() {
+		if trackedOut.Err() != nil || trackedErrOut.Err() != nil {
+			code = 2
+		}
+	}()
+	var doc *ass.Document
+	var result rules.Result
+	var err error
+	if in == nil {
+		doc, result, err = load(path, "auto")
+	} else {
+		doc, result, err = loadReader(in, "auto")
+	}
 	if err != nil {
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2
@@ -56,7 +90,9 @@ func Info(path string, out, errOut io.Writer) int {
 	styles, fonts, undefined := styleRowsSummary(doc)
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Cyan, "== Styles =="))
 	fmt.Fprintf(out, "Definitions: %d\n", len(styles))
-	printStyleTable(out, styles)
+	if err := printStyleTable(out, styles); err != nil {
+		return 2
+	}
 	fmt.Fprintf(out, "Fonts used: %s\n", joinOrNone(fonts))
 	fmt.Fprintf(out, "Undefined style references: %d\n", undefined)
 
@@ -76,8 +112,15 @@ func Info(path string, out, errOut io.Writer) int {
 	}
 
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Cyan, "== Compliance =="))
-	printSummary(out, result)
-	printComplianceDetails(out, result)
+	if err := printSummary(out, result); err != nil {
+		return 2
+	}
+	if err := printComplianceDetails(out, result); err != nil {
+		return 2
+	}
+	if strict && (result.ErrorCount() > 0 || result.ManualCount() > 0) {
+		return 1
+	}
 	return 0
 }
 
@@ -160,21 +203,32 @@ func styleRowsSummary(doc *ass.Document) ([]styleRow, []string, int) {
 	return styles, fontList, undefined
 }
 
-func printStyleTable(out io.Writer, styles []styleRow) {
+func printStyleTable(out io.Writer, styles []styleRow) error {
 	columns := styleColumns(styles)
 	for index, group := range splitStyleColumns(columns, styles) {
 		if index > 0 {
-			fmt.Fprintln(out)
+			if _, err := fmt.Fprintln(out); err != nil {
+				return err
+			}
 		}
 		var rendered bytes.Buffer
 		table := tabwriter.NewWriter(&rendered, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(table, styleTableLine(group, nil))
-		for _, style := range styles {
-			fmt.Fprintln(table, styleTableLine(group, &style))
+		if _, err := fmt.Fprintln(table, styleTableLine(group, nil)); err != nil {
+			return err
 		}
-		_ = table.Flush()
-		writeStyleTable(out, rendered.String())
+		for _, style := range styles {
+			if _, err := fmt.Fprintln(table, styleTableLine(group, &style)); err != nil {
+				return err
+			}
+		}
+		if err := table.Flush(); err != nil {
+			return err
+		}
+		if err := writeStyleTable(out, rendered.String()); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func styleFieldsFor(section ass.Section, style ass.Style) []styleColumn {
@@ -300,14 +354,28 @@ func styleCell(value string) string {
 	return string(runes[:styleCellMaxWidth-3]) + "..."
 }
 
-func writeStyleTable(out io.Writer, rendered string) {
+func writeStyleTable(out io.Writer, rendered string) error {
 	newline := strings.IndexByte(rendered, '\n')
 	if newline < 0 {
-		_, _ = io.WriteString(out, rendered)
-		return
+		written, err := io.WriteString(out, rendered)
+		if err == nil && written != len(rendered) {
+			return io.ErrShortWrite
+		}
+		return err
 	}
-	_, _ = io.WriteString(out, terminal.Color(out, terminal.Bold+terminal.Cyan, rendered[:newline]))
-	_, _ = io.WriteString(out, rendered[newline:])
+	header := terminal.Color(out, terminal.Bold+terminal.Cyan, rendered[:newline])
+	written, err := io.WriteString(out, header)
+	if err != nil {
+		return err
+	}
+	if written != len(header) {
+		return io.ErrShortWrite
+	}
+	written, err = io.WriteString(out, rendered[newline:])
+	if err == nil && written != len(rendered[newline:]) {
+		return io.ErrShortWrite
+	}
+	return err
 }
 
 func eventSummary(doc *ass.Document) (int, int, ass.Time, ass.Time, int, int) {
@@ -333,12 +401,14 @@ func eventSummary(doc *ass.Document) (int, int, ass.Time, ass.Time, int, int) {
 				maxLayer = event.Layer
 			}
 			haveLayer = true
-			if _, startErr := ass.ParseTime(event.StartRaw); startErr == nil {
-				if !haveTime || event.Start < earliest {
-					earliest = event.Start
+			start, startErr := ass.ParseTime(event.StartRaw)
+			end, endErr := ass.ParseTime(event.EndRaw)
+			if startErr == nil && endErr == nil {
+				if !haveTime || start < earliest {
+					earliest = start
 				}
-				if !haveTime || event.End > latest {
-					latest = event.End
+				if !haveTime || end > latest {
+					latest = end
 				}
 				haveTime = true
 			}

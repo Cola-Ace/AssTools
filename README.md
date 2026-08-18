@@ -7,13 +7,13 @@
 ## Commands
 
 ```text
-asst info <input.ass>
-asst check [--ignore-vsfiltermod] <input.ass>
-asst normalize [--backup] [--yes] [--matrix <auto|value>] <input.ass>
+asst info [--strict] [-|--input|<input.ass>]
+asst check [--ignore-vsfiltermod] [-|--input|<input.ass>]
+asst normalize [--backup] [--output <path>] [--yes] [--matrix <auto|value>] <input.ass>
 asst help [command]
 ```
 
-`info` summarizes the file, sections, styles, fonts, events, timing, and compliance. `check` emits stable diagnostics in `path:line: severity[code]: message` form. Tag checking follows libass semantics; VSFilterMod extensions receive separate warnings. `--ignore-vsfiltermod` hides only those compatibility warnings, while syntax errors remain visible. `normalize` previews safe edits, asks for confirmation, then replaces the original with a rechecked candidate; pass `--yes` to skip the confirmation prompt. It does not create a backup by default; pass `--backup` to write a byte-identical `<input.ass>.bak` first.
+`info` summarizes the file, sections, styles, fonts, events, timing, and compliance. Pass `-` or `--input` to read its input from standard input. It returns `0` after a successful load even when compliance findings are present; pass `--strict` to return `1` for compliance errors or unresolved manual items. `check` emits stable diagnostics in `path:line: severity[code]: message` form and also accepts `-`/`--input`. Tag checking follows libass semantics; VSFilterMod extensions receive separate warnings. `--ignore-vsfiltermod` hides only those compatibility warnings, while syntax errors remain visible. `normalize` previews safe edits, asks for confirmation, then replaces the original with a rechecked candidate; pass `--output <path>` to write the candidate elsewhere, or `--yes` to skip the confirmation prompt. It does not create a backup by default; pass `--backup` to write a byte-identical `<input.ass>.bak` first.
 
 The default matrix mode is `auto`. It retains a legal existing value and infers `TV.709` from 1080p or `TV.601` from 720p, preferring `LayoutRes` over `PlayRes`. An explicit value accepts `None`, `TV.601`, `TV.709`, `TV.240M`, `TV.FCC`, and corresponding `PC.*` values (case-insensitive) and is shown in the preview.
 
@@ -31,7 +31,7 @@ Apply 1 change to "episode.ass"?
 Confirm [y/N]
 ```
 
-Exit codes: `0` = success, warnings, or cancellation; `1` = compliance errors or unresolved manual items after normalization; `2` = usage, encoding, I/O, backup, or replacement failures.
+Exit codes: `0` = success, warnings, or cancellation (and non-strict `info` findings); `1` = compliance errors or unresolved manual items after normalization, or strict `info` findings; `2` = usage, encoding, I/O, backup, or replacement failures.
 
 ## Installation
 
@@ -48,4 +48,4 @@ Release builds are made with `CGO_ENABLED=0`, `-trimpath`, and `-ldflags="-s -w"
 
 ## Release process
 
-Every pull request merged into `main` publishes a release. Update `VERSION` with the next `vMAJOR.MINOR.PATCH` and put the user-facing notes for that version in `RELEASE_NOTES.md`. The Release workflow validates and builds a preview on each pull request update, then creates the matching tag and GitHub Release after the pull request is merged.
+Normal pull requests do not publish a release. When preparing a release, open a dedicated pull request that updates `VERSION` with the next `vMAJOR.MINOR.PATCH` and puts the user-facing notes for that version in `RELEASE_NOTES.md`. The Release workflow validates and builds a preview only for pull requests that change those files, then creates the matching tag and GitHub Release after the release pull request is merged.

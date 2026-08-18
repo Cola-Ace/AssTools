@@ -21,12 +21,18 @@ func Enabled(w io.Writer) bool {
 	if os.Getenv("NO_COLOR") != "" || strings.EqualFold(os.Getenv("TERM"), "dumb") {
 		return false
 	}
-	file, ok := w.(*os.File)
-	if !ok {
-		return false
+	for {
+		file, ok := w.(*os.File)
+		if ok {
+			info, err := file.Stat()
+			return err == nil && info.Mode()&os.ModeCharDevice != 0
+		}
+		unwrapper, ok := w.(interface{ Unwrap() io.Writer })
+		if !ok {
+			return false
+		}
+		w = unwrapper.Unwrap()
 	}
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func Color(w io.Writer, style, text string) string {
