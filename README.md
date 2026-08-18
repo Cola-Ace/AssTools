@@ -48,4 +48,4 @@ Release builds are made with `CGO_ENABLED=0`, `-trimpath`, and `-ldflags="-s -w"
 
 ## Release process
 
-Every pull request merged into `main` publishes a release. Update `VERSION` with the next `vMAJOR.MINOR.PATCH` and put the user-facing notes for that version in `RELEASE_NOTES.md`. The Release workflow validates and builds a preview on each pull request update, then creates the matching tag and GitHub Release after the pull request is merged.
+Normal pull requests do not publish a release. When preparing a release, open a dedicated pull request that updates `VERSION` with the next `vMAJOR.MINOR.PATCH` and puts the user-facing notes for that version in `RELEASE_NOTES.md`. The Release workflow validates and builds a preview only for pull requests that change those files, then creates the matching tag and GitHub Release after the release pull request is merged.

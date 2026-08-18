@@ -32,4 +32,4 @@ go test ./...
 
 ## 发布流程
 
-每个合并到 `main` 的 PR 都会发布一个版本。请在 PR 中将 `VERSION` 更新为下一个 `vMAJOR.MINOR.PATCH`，并在 `RELEASE_NOTES.md` 中填写该版本面向用户的说明。Release 工作流会在 PR 每次更新时校验并构建预览产物，PR 合并后再创建对应的 tag 和 GitHub Release。
+普通 PR 不会发布版本。准备发布时，请单独创建一个 release PR，将 `VERSION` 更新为下一个 `vMAJOR.MINOR.PATCH`，并在 `RELEASE_NOTES.md` 中填写该版本面向用户的说明。Release 工作流只会对修改了这两个文件的 PR 进行校验和预览构建；release PR 合并后，再创建对应的 tag 和 GitHub Release。
