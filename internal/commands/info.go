@@ -14,7 +14,30 @@ import (
 )
 
 func Info(path string, out, errOut io.Writer) int {
-	doc, result, err := load(path, "auto")
+	return info(path, nil, false, out, errOut)
+}
+
+func InfoWithOptions(path string, strict bool, out, errOut io.Writer) int {
+	return info(path, nil, strict, out, errOut)
+}
+
+func InfoReader(path string, in io.Reader, out, errOut io.Writer) int {
+	return info(path, in, false, out, errOut)
+}
+
+func InfoReaderWithOptions(path string, in io.Reader, strict bool, out, errOut io.Writer) int {
+	return info(path, in, strict, out, errOut)
+}
+
+func info(path string, in io.Reader, strict bool, out, errOut io.Writer) int {
+	var doc *ass.Document
+	var result rules.Result
+	var err error
+	if in == nil {
+		doc, result, err = load(path, "auto")
+	} else {
+		doc, result, err = loadReader(in, "auto")
+	}
 	if err != nil {
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2
@@ -78,6 +101,9 @@ func Info(path string, out, errOut io.Writer) int {
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Cyan, "== Compliance =="))
 	printSummary(out, result)
 	printComplianceDetails(out, result)
+	if strict && (result.ErrorCount() > 0 || result.ManualCount() > 0) {
+		return 1
+	}
 	return 0
 }
 

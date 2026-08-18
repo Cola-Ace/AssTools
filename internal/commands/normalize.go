@@ -29,23 +29,51 @@ func NormalizeWithBackup(path, matrixMode string, in io.Reader, out, errOut io.W
 	return NormalizeWithOptions(path, matrixMode, true, false, in, out, errOut)
 }
 
-func NormalizeWithOptions(path, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
+func NormalizeWithOptions(path, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer, outputPath ...string) int {
+	destination := path
+	if len(outputPath) > 0 && outputPath[0] != "" {
+		destination = outputPath[0]
+	}
+	return NormalizeWithOutput(path, destination, matrixMode, backupEnabled, skipConfirmation, in, out, errOut)
+}
+
+func NormalizeWithOutput(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
 	canonical, ok := rules.NormalizeMatrixValue(matrixMode)
 	if !ok {
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: invalid matrix value %q", matrixMode)))
 		return 2
 	}
-	return normalize(path, canonical, backupEnabled, skipConfirmation, in, out, errOut)
+	return normalize(path, outputPath, canonical, backupEnabled, skipConfirmation, in, out, errOut)
 }
 
-func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
+func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
 	if canonical, ok := rules.NormalizeMatrixValue(matrixMode); ok {
 		matrixMode = canonical
+	}
+	if outputPath == "" {
+		outputPath = path
 	}
 	doc, result, err := load(path, matrixMode)
 	if err != nil {
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2
+	}
+	sameOutput := outputPath == path
+	if !sameOutput {
+		inputInfo, statErr := os.Stat(path)
+		if statErr != nil {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot stat input: %s", statErr)))
+			return 2
+		}
+		if outputInfo, outputErr := os.Stat(outputPath); outputErr == nil {
+			sameOutput = os.SameFile(inputInfo, outputInfo)
+		} else if !os.IsNotExist(outputErr) {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot inspect output path %s: %s", outputPath, outputErr)))
+			return 2
+		}
+		if sameOutput {
+			outputPath = path
+		}
 	}
 	edits := append([]rules.Edit(nil), result.Edits...)
 	edits = append(edits, sourceFormatEdits(doc)...)
@@ -68,6 +96,9 @@ func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in
 	}
 	fmt.Fprintln(out, terminal.Color(out, terminal.Bold+terminal.Cyan, "== Normalize preview =="))
 	fmt.Fprintf(out, "Input: %s\n", formatEditValue(path))
+	if !sameOutput {
+		fmt.Fprintf(out, "Output: %s\n", formatEditValue(outputPath))
+	}
 	fmt.Fprintf(out, "Matrix mode: %s\n", matrixMode)
 	printMatrixDecision(out, doc, matrixMode)
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold, "Changes:"))
@@ -88,6 +119,17 @@ func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in
 
 	if len(edits) == 0 {
 		fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Green, "No changes required."))
+		if !sameOutput {
+			if writeErr := writeOutputIfUnchanged(path, outputPath, doc.Source.Original, candidate); writeErr != nil {
+				if errors.Is(writeErr, errNormalizeInputChanged) {
+					fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, "asst: input changed while writing output"))
+					return 2
+				}
+				fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot write output %s: %s", outputPath, writeErr)))
+				return 2
+			}
+			fmt.Fprintf(out, "Output written: %s\n", formatEditValue(outputPath))
+		}
 		printSummary(out, candidateResult)
 		if candidateResult.ErrorCount() > 0 || candidateResult.ManualCount() > 0 {
 			return 1
@@ -106,7 +148,7 @@ func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in
 		}
 	}
 	if !skipConfirmation {
-		fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Yellow, fmt.Sprintf("Apply %d %s to %s?", len(edits), plural(len(edits), "change", "changes"), formatEditValue(path))))
+		fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Yellow, fmt.Sprintf("Apply %d %s to %s?", len(edits), plural(len(edits), "change", "changes"), formatEditValue(outputPath))))
 		if backupEnabled {
 			fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, fmt.Sprintf("Backup: %s [y/N]", formatEditValue(backup))))
 		} else {
@@ -141,19 +183,26 @@ func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot stat input: %s", err)))
 		return 2
 	}
-	replacement, err := newReplacementTransaction(path, current, candidate, info.Mode().Perm())
-	if err != nil {
-		if errors.Is(err, errNormalizeInputChanged) {
-			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, "asst: input changed before replacement"))
-		} else {
-			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot prepare replacement for %s: %s", path, err)))
+	var replacement *replacementTransaction
+	var after rules.Result
+	if sameOutput {
+		replacement, err = newReplacementTransaction(path, current, candidate, info.Mode().Perm())
+		if err != nil {
+			if errors.Is(err, errNormalizeInputChanged) {
+				fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, "asst: input changed before replacement"))
+			} else {
+				fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot prepare replacement for %s: %s", path, err)))
+			}
+			return 2
 		}
-		return 2
 	}
 	backupWritten := false
 	if backupEnabled {
 		if err := writeBackup(backup, current, info.Mode().Perm()); err != nil {
-			cleanupErr := replacement.abort()
+			var cleanupErr error
+			if replacement != nil {
+				cleanupErr = replacement.abort()
+			}
 			if cleanupErr != nil {
 				err = errors.Join(err, fmt.Errorf("cleanup failed: %w", cleanupErr))
 			}
@@ -162,40 +211,64 @@ func normalize(path, matrixMode string, backupEnabled, skipConfirmation bool, in
 		}
 		backupWritten = true
 	}
-	if err := replacement.install(); err != nil {
-		cleanupErr := replacement.abort()
-		if backupWritten && !replacement.preservationFailed() {
-			if removeErr := os.Remove(backup); removeErr != nil && !os.IsNotExist(removeErr) {
-				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove backup after failed replacement: %w", removeErr))
+	if replacement != nil {
+		if err := replacement.install(); err != nil {
+			cleanupErr := replacement.abort()
+			if backupWritten && !replacement.preservationFailed() {
+				if removeErr := os.Remove(backup); removeErr != nil && !os.IsNotExist(removeErr) {
+					cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove backup after failed replacement: %w", removeErr))
+				}
+			}
+			if cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("cleanup failed: %w", cleanupErr))
+			}
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot replace %s: %s", path, err)))
+			return 2
+		}
+		_, after, err = load(path, matrixMode)
+		if err == nil {
+			applied, readErr := os.ReadFile(path)
+			if readErr != nil {
+				err = readErr
+			} else if !bytes.Equal(applied, candidate) {
+				err = errNormalizeInputChanged
 			}
 		}
-		if cleanupErr != nil {
-			err = errors.Join(err, fmt.Errorf("cleanup failed: %w", cleanupErr))
+		if err != nil {
+			rollbackErr := replacement.rollback()
+			if rollbackErr != nil {
+				fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file cannot be checked: %s; rollback failed: %s", err, rollbackErr)))
+			} else {
+				fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file cannot be checked: %s; original restored", err)))
+			}
+			return 2
 		}
-		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot replace %s: %s", path, err)))
-		return 2
-	}
-	_, after, err := load(path, matrixMode)
-	if err == nil {
-		applied, readErr := os.ReadFile(path)
+		if err := replacement.commit(); err != nil {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file was applied but temporary cleanup failed: %s", err)))
+			return 2
+		}
+	} else {
+		if err := writeOutputFile(outputPath, candidate, info.Mode().Perm()); err != nil {
+			if backupWritten {
+				if removeErr := os.Remove(backup); removeErr != nil && !os.IsNotExist(removeErr) {
+					err = errors.Join(err, fmt.Errorf("remove backup after failed output: %w", removeErr))
+				}
+			}
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot write output %s: %s", outputPath, err)))
+			return 2
+		}
+		applied, readErr := os.ReadFile(outputPath)
 		if readErr != nil {
 			err = readErr
 		} else if !bytes.Equal(applied, candidate) {
 			err = errNormalizeInputChanged
-		}
-	}
-	if err != nil {
-		rollbackErr := replacement.rollback()
-		if rollbackErr != nil {
-			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file cannot be checked: %s; rollback failed: %s", err, rollbackErr)))
 		} else {
-			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file cannot be checked: %s; original restored", err)))
+			_, after, err = checkBytes(applied, matrixMode)
 		}
-		return 2
-	}
-	if err := replacement.commit(); err != nil {
-		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized file was applied but temporary cleanup failed: %s", err)))
-		return 2
+		if err != nil {
+			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalized output cannot be checked: %s", err)))
+			return 2
+		}
 	}
 	fmt.Fprintln(out, terminal.Color(out, terminal.Green, fmt.Sprintf("Applied %d %s.", len(edits), plural(len(edits), "change", "changes"))))
 	if backupEnabled {
@@ -380,6 +453,71 @@ func writeBackup(path string, data []byte, mode os.FileMode) error {
 	keepTemp = false
 	_ = os.Remove(tempPath)
 	return nil
+}
+
+func writeOutputIfUnchanged(inputPath, outputPath string, expected, data []byte) error {
+	normalizeWriteMu.Lock()
+	defer normalizeWriteMu.Unlock()
+	current, err := os.ReadFile(inputPath)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, expected) {
+		return errNormalizeInputChanged
+	}
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return err
+	}
+	return writeOutputFile(outputPath, data, info.Mode().Perm())
+}
+
+func writeOutputFile(path string, data []byte, mode os.FileMode) error {
+	destinationInfo, statErr := os.Lstat(path)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return statErr
+	}
+	if statErr == nil && !destinationInfo.Mode().IsRegular() {
+		return fmt.Errorf("output is not a regular file")
+	}
+	directory := filepath.Dir(path)
+	base := filepath.Base(path)
+	tempPath, err := writeTempFile(directory, "."+base+".asst-output-*", data, mode)
+	if err != nil {
+		return err
+	}
+	keepTemp := true
+	defer func() {
+		if keepTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err := os.Rename(tempPath, path); err == nil {
+		keepTemp = false
+		return nil
+	} else {
+		firstErr := err
+		displacedPath, tempErr := newTempPath(directory, "."+base+".asst-displaced-*")
+		if tempErr != nil {
+			return errors.Join(firstErr, fmt.Errorf("prepare existing output: %w", tempErr))
+		}
+		if err := os.Rename(path, displacedPath); err != nil {
+			_ = os.Remove(displacedPath)
+			return errors.Join(firstErr, fmt.Errorf("preserve existing output: %w", err))
+		}
+		if err := os.Rename(tempPath, path); err != nil {
+			restoreErr := restoreFromTemp(displacedPath, path)
+			if restoreErr != nil {
+				return errors.Join(firstErr, err, fmt.Errorf("restore existing output: %w", restoreErr))
+			}
+			return errors.Join(firstErr, err)
+		}
+		keepTemp = false
+		if err := os.Remove(displacedPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove replaced output: %w", err)
+		}
+		return nil
+	}
 }
 
 func replaceFile(path string, data []byte, mode os.FileMode) error {

@@ -9,7 +9,21 @@ import (
 )
 
 func Check(path string, out, errOut io.Writer, ignoreVSFilterModWarnings ...bool) int {
-	_, result, err := load(path, "auto")
+	return check(path, nil, out, errOut, ignoreVSFilterModWarnings...)
+}
+
+func CheckReader(path string, in io.Reader, out, errOut io.Writer, ignoreVSFilterModWarnings ...bool) int {
+	return check(path, in, out, errOut, ignoreVSFilterModWarnings...)
+}
+
+func check(path string, in io.Reader, out, errOut io.Writer, ignoreVSFilterModWarnings ...bool) int {
+	var result rules.Result
+	var err error
+	if in == nil {
+		_, result, err = load(path, "auto")
+	} else {
+		_, result, err = loadReader(in, "auto")
+	}
 	if err != nil {
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2

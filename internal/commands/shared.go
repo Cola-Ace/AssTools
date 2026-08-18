@@ -26,6 +26,14 @@ func load(path, matrixMode string) (*ass.Document, rules.Result, error) {
 	return doc, rules.Run(doc, matrixMode), nil
 }
 
+func loadReader(in io.Reader, matrixMode string) (*ass.Document, rules.Result, error) {
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return nil, rules.Result{}, err
+	}
+	return checkBytes(data, matrixMode)
+}
+
 func checkBytes(data []byte, matrixMode string) (*ass.Document, rules.Result, error) {
 	source, err := ass.ParseBytes(data)
 	if err != nil {

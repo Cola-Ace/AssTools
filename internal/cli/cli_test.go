@@ -10,7 +10,7 @@ import (
 
 func TestRunHelpAndUsageErrors(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := Run(nil, strings.NewReader(""), &out, &errOut); code != 0 || !strings.Contains(out.String(), "asst - cross-platform") || !strings.Contains(out.String(), "normalize [--backup]") || !strings.Contains(out.String(), "Exit codes: 0 = success, warnings, or cancellation; 1 = compliance errors or unresolved manual items; 2 = usage, encoding, I/O, backup, or replacement failures") {
+	if code := Run(nil, strings.NewReader(""), &out, &errOut); code != 0 || !strings.Contains(out.String(), "asst - cross-platform") || !strings.Contains(out.String(), "normalize [--backup]") || !strings.Contains(out.String(), "Exit codes: 0 = success, warnings, cancellation, or non-strict info findings; 1 = compliance errors, unresolved manual items, or strict info findings; 2 = usage, encoding, I/O, backup, or replacement failures") {
 		t.Fatalf("help failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -23,7 +23,7 @@ func TestRunHelpAndUsageErrors(t *testing.T) {
 	if code := Run([]string{"info"}, strings.NewReader(""), &out, &errOut); code != 2 {
 		t.Fatalf("missing input should be a usage error: code=%d out=%q err=%q", code, out.String(), errOut.String())
 	}
-	want := "asst: info requires exactly one .ass file\n\nUsage: asst info <input.ass>\n\nPrint file metadata, sections, styles, fonts, events, and a compliance summary.\n"
+	want := "asst: info requires exactly one .ass file\n\nUsage: asst info [--strict] [-|--input|<input.ass>]\n\nPrint file metadata, sections, styles, fonts, events, and a compliance summary.\nUse - or --input to read ASS data from standard input.\nBy default info always exits 0 after a successful load; --strict exits 1 for compliance errors or unresolved manual items.\n"
 	if got := errOut.String(); got != want {
 		t.Fatalf("usage spacing mismatch: got=%q want=%q", got, want)
 	}
@@ -124,6 +124,61 @@ func TestNormalizeYesAppliesWithoutConfirmation(t *testing.T) {
 	}
 	if bytes.Equal(got, data) {
 		t.Fatalf("input was not normalized: %q", got)
+	}
+}
+
+func TestNormalizeOutputWritesSeparateFile(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "sample.ass")
+	outputPath := filepath.Join(directory, "normalized.ass")
+	data := []byte("[Script Info]\n; generated\nScriptType: v4.00+\nWrapStyle: 2\nScaledBorderAndShadow: yes\nYCbCr Matrix: TV.709\nLayoutResX: 1920\nLayoutResY: 1080\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,hello\\n\n")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"normalize", "--yes", "--output", outputPath, path}, strings.NewReader(""), &out, &errOut); code != 0 || errOut.Len() != 0 {
+		t.Fatalf("normalize --output failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	gotInput, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotInput, data) {
+		t.Fatalf("input changed while writing output: %q", gotInput)
+	}
+	gotOutput, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(gotOutput, data) || !strings.Contains(out.String(), "Output: \""+outputPath+"\"") {
+		t.Fatalf("output was not normalized separately: out=%q output=%q", out.String(), gotOutput)
+	}
+}
+
+func TestInfoAndCheckReadStdin(t *testing.T) {
+	data := []byte("[Script Info]\n; generated\n")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"info", "--input"}, bytes.NewReader(data), &out, &errOut); code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "Path: \"-\"") {
+		t.Fatalf("info --input failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Run([]string{"check", "-"}, bytes.NewReader(data), &out, &errOut); code != 1 || errOut.Len() != 0 || !strings.Contains(out.String(), "-:2:") {
+		t.Fatalf("check - failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestInfoStrictExitCode(t *testing.T) {
+	data := []byte("[Script Info]\n")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"info", "-"}, bytes.NewReader(data), &out, &errOut); code != 0 || errOut.Len() != 0 {
+		t.Fatalf("non-strict info returned code %d, out=%q err=%q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Run([]string{"info", "--strict", "-"}, bytes.NewReader(data), &out, &errOut); code != 1 || errOut.Len() != 0 {
+		t.Fatalf("strict info returned code %d, out=%q err=%q", code, out.String(), errOut.String())
 	}
 }
 

@@ -14,6 +14,7 @@ func runNormalize(args []string, in io.Reader, out, errOut io.Writer) int {
 	matrix := "auto"
 	backup := false
 	skipConfirmation := false
+	outputPath := ""
 	path := ""
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -23,6 +24,21 @@ func runNormalize(args []string, in io.Reader, out, errOut io.Writer) int {
 		}
 		if arg == "--yes" {
 			skipConfirmation = true
+			continue
+		}
+		if arg == "--output" {
+			if i+1 >= len(args) || args[i+1] == "" || (strings.HasPrefix(args[i+1], "-") && args[i+1] != "-") {
+				return usageForCommand(errOut, "normalize", "--output requires a value")
+			}
+			outputPath = args[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "--output=") {
+			outputPath = strings.TrimPrefix(arg, "--output=")
+			if outputPath == "" {
+				return usageForCommand(errOut, "normalize", "--output requires a value")
+			}
 			continue
 		}
 		if arg == "--matrix" {
@@ -53,7 +69,10 @@ func runNormalize(args []string, in io.Reader, out, errOut io.Writer) int {
 		return usageForCommand(errOut, "normalize", fmt.Sprintf("invalid matrix value %q", matrix))
 	}
 	matrix = canonical
-	return commands.NormalizeWithOptions(path, matrix, backup, skipConfirmation, in, out, errOut)
+	if outputPath == "" {
+		outputPath = path
+	}
+	return commands.NormalizeWithOutput(path, outputPath, matrix, backup, skipConfirmation, in, out, errOut)
 }
 
 func canonicalMatrix(value string) (string, bool) {
@@ -61,9 +80,10 @@ func canonicalMatrix(value string) (string, bool) {
 }
 
 func printNormalizeHelp(out io.Writer) {
-	fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Usage: asst normalize [--backup] [--yes] [--matrix <auto|value>] <input.ass>"))
+	fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Usage: asst normalize [--backup] [--output <path>] [--yes] [--matrix <auto|value>] <input.ass>"))
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Preview safe edits and apply them only after a y/yes confirmation; use --yes to skip confirmation. No backup is created by default.")
+	fmt.Fprintln(out, "Use --output to write the normalized candidate to another path; without it the input is replaced.")
 	fmt.Fprintln(out, "Use --backup to write a byte-identical <input.ass>.bak before replacing the original.")
 	fmt.Fprintln(out, "The default matrix mode is auto; explicit values use canonical spelling.")
 }
