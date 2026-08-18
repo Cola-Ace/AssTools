@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,4 +140,44 @@ func TestInfoIncludesComplianceDetails(t *testing.T) {
 	if want := "Path: \"" + path + "\""; !strings.Contains(out.String(), want) {
 		t.Fatalf("info output is missing raw path %q:\n%s", want, out.String())
 	}
+}
+
+func TestEventSummaryIgnoresInvalidEndTime(t *testing.T) {
+	data := []byte("[Events]\n" +
+		"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" +
+		"Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,valid\n" +
+		"Dialogue: 0,0:00:03.00,invalid,Default,,0,0,0,,invalid end\n")
+	source, err := ass.ParseBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := ass.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dialogues, comments, earliest, latest, _, _ := eventSummary(doc)
+	if dialogues != 2 || comments != 0 {
+		t.Fatalf("unexpected event counts: dialogues=%d comments=%d", dialogues, comments)
+	}
+	if earliest != 100 || latest != 200 {
+		t.Fatalf("invalid end time affected span: earliest=%d latest=%d", earliest, latest)
+	}
+}
+
+func TestInfoReturnsFailureWhenOutputWriterFails(t *testing.T) {
+	writerErr := errors.New("broken pipe")
+	var errOut bytes.Buffer
+	code := InfoReader("sample.ass", strings.NewReader("[Script Info]\n"), infoFailingWriter{err: writerErr}, &errOut)
+	if code != 2 {
+		t.Fatalf("expected output failure exit code 2, got %d", code)
+	}
+}
+
+type infoFailingWriter struct {
+	err error
+}
+
+func (writer infoFailingWriter) Write([]byte) (int, error) {
+	return 0, writer.err
 }

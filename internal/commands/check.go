@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"asstools/internal/output"
 	"asstools/internal/rules"
 	"asstools/internal/terminal"
 )
@@ -16,7 +17,16 @@ func CheckReader(path string, in io.Reader, out, errOut io.Writer, ignoreVSFilte
 	return check(path, in, out, errOut, ignoreVSFilterModWarnings...)
 }
 
-func check(path string, in io.Reader, out, errOut io.Writer, ignoreVSFilterModWarnings ...bool) int {
+func check(path string, in io.Reader, out, errOut io.Writer, ignoreVSFilterModWarnings ...bool) (code int) {
+	trackedOut := output.Track(out)
+	trackedErrOut := output.Track(errOut)
+	out = trackedOut
+	errOut = trackedErrOut
+	defer func() {
+		if trackedOut.Err() != nil || trackedErrOut.Err() != nil {
+			code = 2
+		}
+	}()
 	var result rules.Result
 	var err error
 	if in == nil {
@@ -46,7 +56,9 @@ func check(path string, in io.Reader, out, errOut io.Writer, ignoreVSFilterModWa
 		}
 		fmt.Fprintln(out)
 	}
-	printSummary(out, result)
+	if err := printSummary(out, result); err != nil {
+		return 2
+	}
 	if result.ErrorCount() > 0 {
 		return 1
 	}

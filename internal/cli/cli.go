@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"asstools/internal/output"
 	"asstools/internal/terminal"
 )
 
@@ -14,7 +15,16 @@ const (
 	ExitUsage = 2
 )
 
-func Run(args []string, in io.Reader, out, errOut io.Writer) int {
+func Run(args []string, in io.Reader, out, errOut io.Writer) (code int) {
+	trackedOut := output.Track(out)
+	trackedErrOut := output.Track(errOut)
+	out = trackedOut
+	errOut = trackedErrOut
+	defer func() {
+		if trackedOut.Err() != nil || trackedErrOut.Err() != nil {
+			code = ExitUsage
+		}
+	}()
 	if len(args) == 0 {
 		printHelp(out, "")
 		return ExitOK

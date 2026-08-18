@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"asstools/internal/ass"
+	"asstools/internal/output"
 	"asstools/internal/rules"
 	"asstools/internal/terminal"
 )
@@ -37,7 +38,16 @@ func NormalizeWithOptions(path, matrixMode string, backupEnabled, skipConfirmati
 	return NormalizeWithOutput(path, destination, matrixMode, backupEnabled, skipConfirmation, in, out, errOut)
 }
 
-func NormalizeWithOutput(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
+func NormalizeWithOutput(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) (code int) {
+	trackedOut := output.Track(out)
+	trackedErrOut := output.Track(errOut)
+	out = trackedOut
+	errOut = trackedErrOut
+	defer func() {
+		if trackedOut.Err() != nil || trackedErrOut.Err() != nil {
+			code = 2
+		}
+	}()
 	canonical, ok := rules.NormalizeMatrixValue(matrixMode)
 	if !ok {
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: invalid matrix value %q", matrixMode)))
@@ -46,7 +56,16 @@ func NormalizeWithOutput(path, outputPath, matrixMode string, backupEnabled, ski
 	return normalize(path, outputPath, canonical, backupEnabled, skipConfirmation, in, out, errOut)
 }
 
-func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) int {
+func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) (code int) {
+	trackedOut := output.Track(out)
+	trackedErrOut := output.Track(errOut)
+	out = trackedOut
+	errOut = trackedErrOut
+	defer func() {
+		if trackedOut.Err() != nil || trackedErrOut.Err() != nil {
+			code = 2
+		}
+	}()
 	if canonical, ok := rules.NormalizeMatrixValue(matrixMode); ok {
 		matrixMode = canonical
 	}
@@ -100,12 +119,16 @@ func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmat
 		fmt.Fprintf(out, "Output: %s\n", formatEditValue(outputPath))
 	}
 	fmt.Fprintf(out, "Matrix mode: %s\n", matrixMode)
-	printMatrixDecision(out, doc, matrixMode)
+	if err := printMatrixDecision(out, doc, matrixMode); err != nil {
+		return 2
+	}
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold, "Changes:"))
 	if len(edits) == 0 {
 		fmt.Fprintln(out, "  none")
 	} else {
-		printEdits(out, edits)
+		if err := printEdits(out, edits); err != nil {
+			return 2
+		}
 	}
 	fmt.Fprintln(out, "\n"+terminal.Color(out, terminal.Bold+terminal.Magenta, "Manual items:"))
 	manuals := manualDiagnostics(result)
@@ -115,6 +138,9 @@ func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmat
 		for _, diagnostic := range manuals {
 			fmt.Fprintf(out, "  line %d [%s] %s\n", diagnostic.Line, terminal.Color(out, terminal.Magenta, diagnostic.Code), diagnostic.Message)
 		}
+	}
+	if trackedOut.Err() != nil || trackedErrOut.Err() != nil {
+		return 2
 	}
 
 	if len(edits) == 0 {
@@ -130,7 +156,9 @@ func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmat
 			}
 			fmt.Fprintf(out, "Output written: %s\n", formatEditValue(outputPath))
 		}
-		printSummary(out, candidateResult)
+		if err := printSummary(out, candidateResult); err != nil {
+			return 2
+		}
 		if candidateResult.ErrorCount() > 0 || candidateResult.ManualCount() > 0 {
 			return 1
 		}
@@ -153,6 +181,9 @@ func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmat
 			fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, fmt.Sprintf("Backup: %s [y/N]", formatEditValue(backup))))
 		} else {
 			fmt.Fprintf(out, "%s ", terminal.Color(out, terminal.Cyan, "Confirm [y/N]"))
+		}
+		if trackedOut.Err() != nil || trackedErrOut.Err() != nil {
+			return 2
 		}
 		reader := bufio.NewReader(in)
 		answer, readErr := reader.ReadString('\n')
@@ -318,29 +349,36 @@ func sourceFormatEdits(doc *ass.Document) []rules.Edit {
 	return edits
 }
 
-func printEdit(out io.Writer, edit rules.Edit) {
+func printEdit(out io.Writer, edit rules.Edit) error {
 	code := terminal.Color(out, terminal.Cyan, "["+edit.Code+"]")
 	before, after := formatEditDiff(out, edit.Before, edit.After)
 	if edit.Start == edit.End && edit.Before == "<missing>" {
-		fmt.Fprintf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description)
-		fmt.Fprintf(out, "    before: %s\n    after:  %s\n", before, after)
-		return
+		if err := writeOutputf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description); err != nil {
+			return err
+		}
+		return writeOutputf(out, "    before: %s\n    after:  %s\n", before, after)
 	}
 	if strings.HasPrefix(edit.Before, "lines ") && edit.After == "" {
-		fmt.Fprintf(out, "  %s  %s %s\n", edit.Before, code, edit.Description)
-		return
+		return writeOutputf(out, "  %s  %s %s\n", edit.Before, code, edit.Description)
 	}
-	fmt.Fprintf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description)
-	fmt.Fprintf(out, "    before: %s\n    after:  %s\n", before, after)
+	if err := writeOutputf(out, "  line %d  %s %s\n", edit.Line, code, edit.Description); err != nil {
+		return err
+	}
+	return writeOutputf(out, "    before: %s\n    after:  %s\n", before, after)
 }
 
-func printEdits(out io.Writer, edits []rules.Edit) {
+func printEdits(out io.Writer, edits []rules.Edit) error {
 	for index, edit := range edits {
-		printEdit(out, edit)
+		if err := printEdit(out, edit); err != nil {
+			return err
+		}
 		if index < len(edits)-1 {
-			fmt.Fprintln(out)
+			if err := writeOutputln(out); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func formatEditDiff(out io.Writer, beforeValue, afterValue string) (string, string) {
@@ -403,25 +441,25 @@ func formatEditValue(value string) string {
 	return strings.ReplaceAll(fmt.Sprintf("%q", value), `\\`, `\`)
 }
 
-func printMatrixDecision(out io.Writer, doc *ass.Document, matrixMode string) {
+func printMatrixDecision(out io.Writer, doc *ass.Document, matrixMode string) error {
 	if strings.EqualFold(matrixMode, "auto") {
 		property := doc.ScriptProperties()["ycbcr matrix"]
 		if canonical, ok := rules.NormalizeMatrixValue(property.Value); ok {
 			if candidate, _ := rules.InferMatrix(doc); candidate != nil {
-				fmt.Fprintf(out, "Matrix decision: retain existing %s (valid; matches candidate %s)\n", canonical, candidate.Detail)
+				return writeOutputf(out, "Matrix decision: retain existing %s (valid; matches candidate %s)\n", canonical, candidate.Detail)
 			} else {
-				fmt.Fprintf(out, "Matrix decision: retain existing %s (valid)\n", canonical)
+				return writeOutputf(out, "Matrix decision: retain existing %s (valid)\n", canonical)
 			}
 		} else if candidate, _ := rules.InferMatrix(doc); candidate != nil {
-			fmt.Fprintf(out, "Matrix decision: %s\n", candidate.Detail)
+			return writeOutputf(out, "Matrix decision: %s\n", candidate.Detail)
 		} else {
-			fmt.Fprintln(out, "Matrix decision: manual review required")
+			return writeOutputln(out, "Matrix decision: manual review required")
 		}
-		return
 	}
 	if canonical, ok := rules.NormalizeMatrixValue(matrixMode); ok {
-		fmt.Fprintf(out, "Matrix decision: %s (explicit override)\n", canonical)
+		return writeOutputf(out, "Matrix decision: %s (explicit override)\n", canonical)
 	}
+	return nil
 }
 
 func manualDiagnostics(result rules.Result) []rules.Diagnostic {
