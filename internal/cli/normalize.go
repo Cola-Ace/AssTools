@@ -14,6 +14,7 @@ func runNormalize(args []string, in io.Reader, out, errOut io.Writer) int {
 	matrix := "auto"
 	backup := false
 	skipConfirmation := false
+	jsonOutput := hasJSONFlag(args)
 	outputPath := ""
 	path := ""
 	for i := 0; i < len(args); i++ {
@@ -26,9 +27,13 @@ func runNormalize(args []string, in io.Reader, out, errOut io.Writer) int {
 			skipConfirmation = true
 			continue
 		}
+		if arg == "--json" {
+			jsonOutput = true
+			continue
+		}
 		if arg == "--output" {
 			if i+1 >= len(args) || args[i+1] == "" || (strings.HasPrefix(args[i+1], "-") && args[i+1] != "-") {
-				return usageForCommand(errOut, "normalize", "--output requires a value")
+				return usageForCommandOutput(out, errOut, "normalize", "--output requires a value", jsonOutput)
 			}
 			outputPath = args[i+1]
 			i++
@@ -37,13 +42,13 @@ func runNormalize(args []string, in io.Reader, out, errOut io.Writer) int {
 		if strings.HasPrefix(arg, "--output=") {
 			outputPath = strings.TrimPrefix(arg, "--output=")
 			if outputPath == "" {
-				return usageForCommand(errOut, "normalize", "--output requires a value")
+				return usageForCommandOutput(out, errOut, "normalize", "--output requires a value", jsonOutput)
 			}
 			continue
 		}
 		if arg == "--matrix" {
 			if i+1 >= len(args) {
-				return usageForCommand(errOut, "normalize", "--matrix requires a value")
+				return usageForCommandOutput(out, errOut, "normalize", "--matrix requires a value", jsonOutput)
 			}
 			matrix = args[i+1]
 			i++
@@ -54,25 +59,25 @@ func runNormalize(args []string, in io.Reader, out, errOut io.Writer) int {
 			continue
 		}
 		if strings.HasPrefix(arg, "-") {
-			return usageForCommand(errOut, "normalize", fmt.Sprintf("unknown option %q", arg))
+			return usageForCommandOutput(out, errOut, "normalize", fmt.Sprintf("unknown option %q", arg), jsonOutput)
 		}
 		if path != "" {
-			return usageForCommand(errOut, "normalize", "normalize accepts one .ass file")
+			return usageForCommandOutput(out, errOut, "normalize", "normalize accepts one .ass file", jsonOutput)
 		}
 		path = arg
 	}
 	if path == "" {
-		return usageForCommand(errOut, "normalize", "normalize requires one .ass file")
+		return usageForCommandOutput(out, errOut, "normalize", "normalize requires one .ass file", jsonOutput)
 	}
 	canonical, ok := canonicalMatrix(matrix)
 	if !ok {
-		return usageForCommand(errOut, "normalize", fmt.Sprintf("invalid matrix value %q", matrix))
+		return usageForCommandOutput(out, errOut, "normalize", fmt.Sprintf("invalid matrix value %q", matrix), jsonOutput)
 	}
 	matrix = canonical
 	if outputPath == "" {
 		outputPath = path
 	}
-	return commands.NormalizeWithOutput(path, outputPath, matrix, backup, skipConfirmation, in, out, errOut)
+	return commands.NormalizeWithJSONOutput(path, outputPath, matrix, backup, skipConfirmation, jsonOutput, in, out, errOut)
 }
 
 func canonicalMatrix(value string) (string, bool) {
@@ -80,10 +85,11 @@ func canonicalMatrix(value string) (string, bool) {
 }
 
 func printNormalizeHelp(out io.Writer) {
-	fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Usage: asst normalize [--backup] [--output <path>] [--yes] [--matrix <auto|value>] <input.ass>"))
+	fmt.Fprintln(out, terminal.Color(out, terminal.Bold, "Usage: asst normalize [--backup] [--output <path>] [--yes] [--json] [--matrix <auto|value>] <input.ass>"))
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Preview safe edits and apply them only after a y/yes confirmation; use --yes to skip confirmation. No backup is created by default.")
 	fmt.Fprintln(out, "Use --output to write the normalized candidate to another path; without it the input is replaced.")
 	fmt.Fprintln(out, "Use --backup to write a byte-identical <input.ass>.bak before replacing the original.")
+	fmt.Fprintln(out, "Use --json for a single machine-readable JSON document; without --yes it returns a preview without prompting.")
 	fmt.Fprintln(out, "The default matrix mode is auto; explicit values use canonical spelling.")
 }
