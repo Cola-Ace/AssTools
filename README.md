@@ -7,15 +7,25 @@
 ## Commands
 
 ```text
-asst info [--strict] [-|--input|<input.ass>]
-asst check [--ignore-vsfiltermod] [-|--input|<input.ass>]
-asst normalize [--backup] [--output <path>] [--yes] [--matrix <auto|value>] <input.ass>
-asst help [command]
+asst info [--strict] [--json] [-|--input|<input.ass>]
+asst check [--ignore-vsfiltermod] [--json] [-|--input|<input.ass>]
+asst normalize [--backup] [--output <path>] [--yes] [--json] [--matrix <auto|value>] <input.ass>
+asst help [--json] [command]
 ```
 
 `info` summarizes the file, sections, styles, fonts, events, timing, and compliance. Pass `-` or `--input` to read its input from standard input. It returns `0` after a successful load even when compliance findings are present; pass `--strict` to return `1` for compliance errors or unresolved manual items. `check` emits stable diagnostics in `path:line: severity[code]: message` form and also accepts `-`/`--input`. Tag checking follows libass semantics; VSFilterMod extensions receive separate warnings. `--ignore-vsfiltermod` hides only those compatibility warnings, while syntax errors remain visible. `normalize` previews safe edits, asks for confirmation, then replaces the original with a rechecked candidate; pass `--output <path>` to write the candidate elsewhere, or `--yes` to skip the confirmation prompt. It does not create a backup by default; pass `--backup` to write a byte-identical `<input.ass>.bak` first.
 
 The default matrix mode is `auto`. It retains a legal existing value and infers `TV.709` from 1080p or `TV.601` from 720p, preferring `LayoutRes` over `PlayRes`. An explicit value accepts `None`, `TV.601`, `TV.709`, `TV.240M`, `TV.FCC`, and corresponding `PC.*` values (case-insensitive) and is shown in the preview.
+
+Pass `--json` to any command for one normalized JSON document on standard output. JSON output includes stable command/status fields, summaries, diagnostics, and command-specific metadata; `help --json` returns command metadata. `normalize --json` returns a preview without prompting; add `--yes` to apply the changes.
+
+In `info --json`, `structure.matrix_candidate` is the canonical matrix value; inference context is reported separately in `structure.matrix_candidate_reason`.
+
+Each `styles.definitions` entry is the complete style value map. When all style definitions share one format, that format is emitted once as `styles.fields`.
+
+Style value keys use consistent snake_case names such as `font_name`, `font_size`, and `primary_colour`.
+
+When all style definitions share one format, that format is emitted once as `styles.fields`; per-definition `fields` are only included when formats differ.
 
 ```text
 $ asst check episode.ass

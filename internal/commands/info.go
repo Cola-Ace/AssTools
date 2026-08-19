@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 
 	"asstools/internal/ass"
 	"asstools/internal/output"
@@ -15,22 +16,30 @@ import (
 )
 
 func Info(path string, out, errOut io.Writer) int {
-	return info(path, nil, false, out, errOut)
+	return InfoWithJSONOptions(path, false, false, out, errOut)
 }
 
 func InfoWithOptions(path string, strict bool, out, errOut io.Writer) int {
-	return info(path, nil, strict, out, errOut)
+	return InfoWithJSONOptions(path, strict, false, out, errOut)
 }
 
 func InfoReader(path string, in io.Reader, out, errOut io.Writer) int {
-	return info(path, in, false, out, errOut)
+	return InfoReaderWithJSONOptions(path, in, false, false, out, errOut)
 }
 
 func InfoReaderWithOptions(path string, in io.Reader, strict bool, out, errOut io.Writer) int {
-	return info(path, in, strict, out, errOut)
+	return InfoReaderWithJSONOptions(path, in, strict, false, out, errOut)
 }
 
-func info(path string, in io.Reader, strict bool, out, errOut io.Writer) (code int) {
+func InfoWithJSONOptions(path string, strict, jsonOutput bool, out, errOut io.Writer) int {
+	return info(path, nil, strict, jsonOutput, out, errOut)
+}
+
+func InfoReaderWithJSONOptions(path string, in io.Reader, strict, jsonOutput bool, out, errOut io.Writer) int {
+	return info(path, in, strict, jsonOutput, out, errOut)
+}
+
+func info(path string, in io.Reader, strict, jsonOutput bool, out, errOut io.Writer) (code int) {
 	path = cleanPath(path)
 	trackedOut := output.Track(out)
 	trackedErrOut := output.Track(errOut)
@@ -50,8 +59,23 @@ func info(path string, in io.Reader, strict bool, out, errOut io.Writer) (code i
 		doc, result, err = loadReader(in, "auto")
 	}
 	if err != nil {
+		if jsonOutput {
+			if jsonErr := writeJSONError(errOut, "info", err); jsonErr != nil {
+				return 2
+			}
+			return 2
+		}
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2
+	}
+	if jsonOutput {
+		if err := encodeJSON(out, infoJSONPayload(path, doc, result)); err != nil {
+			return 2
+		}
+		if strict && (result.ErrorCount() > 0 || result.ManualCount() > 0) {
+			return 1
+		}
+		return 0
 	}
 	source := doc.Source
 	fmt.Fprintln(out, terminal.Color(out, terminal.Bold+terminal.Cyan, "== File =="))
@@ -460,4 +484,253 @@ func yesNo(value bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+type infoJSON struct {
+	Command     string            `json:"command"`
+	Status      string            `json:"status"`
+	Path        string            `json:"path"`
+	File        infoFileJSON      `json:"file"`
+	Structure   infoStructureJSON `json:"structure"`
+	Styles      infoStylesJSON    `json:"styles"`
+	Events      infoEventsJSON    `json:"events"`
+	Summary     jsonSummary       `json:"summary"`
+	Diagnostics []jsonDiagnostic  `json:"diagnostics"`
+}
+
+type infoFileJSON struct {
+	SizeBytes       int                 `json:"size_bytes"`
+	Encoding        string              `json:"encoding"`
+	BOM             bool                `json:"bom"`
+	LineEndings     infoLineEndingsJSON `json:"line_endings"`
+	TrailingNewline bool                `json:"trailing_newline"`
+}
+
+type infoLineEndingsJSON struct {
+	CRLF  int  `json:"crlf"`
+	LF    int  `json:"lf"`
+	Mixed bool `json:"mixed"`
+}
+
+type infoStructureJSON struct {
+	Sections              []infoSectionJSON `json:"sections"`
+	Properties            map[string]string `json:"properties"`
+	MatrixCandidate       string            `json:"matrix_candidate"`
+	MatrixCandidateReason string            `json:"matrix_candidate_reason"`
+	MatrixResolutionNote  string            `json:"matrix_resolution_note"`
+}
+
+type infoSectionJSON struct {
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+}
+
+type infoStylesJSON struct {
+	Definitions              []map[string]string `json:"definitions"`
+	Fields                   []string            `json:"fields,omitempty"`
+	FontsUsed                []string            `json:"fonts_used"`
+	UndefinedStyleReferences int                 `json:"undefined_style_references"`
+}
+
+type infoEventsJSON struct {
+	Dialogue   int                 `json:"dialogue"`
+	Comment    int                 `json:"comment"`
+	TimeSpan   *infoTimeSpanJSON   `json:"time_span"`
+	LayerRange *infoLayerRangeJSON `json:"layer_range"`
+}
+
+type infoTimeSpanJSON struct {
+	Start    string `json:"start"`
+	End      string `json:"end"`
+	Duration string `json:"duration"`
+}
+
+type infoLayerRangeJSON struct {
+	Min int `json:"min"`
+	Max int `json:"max"`
+}
+
+func infoJSONPayload(path string, doc *ass.Document, result rules.Result) infoJSON {
+	source := doc.Source
+	lf, crlf := newlineCounts(source)
+	sections := make([]infoSectionJSON, 0, len(doc.Sections))
+	for _, section := range doc.Sections {
+		sections = append(sections, infoSectionJSON{
+			Name:      section.RawName,
+			Kind:      string(section.Kind),
+			StartLine: section.StartLine,
+			EndLine:   section.EndLine,
+		})
+	}
+	properties := make(map[string]string)
+	for key, property := range doc.ScriptProperties() {
+		label := property.RawKey
+		if label == "" {
+			label = key
+		}
+		properties[label] = property.Value
+	}
+	matrixCandidate := ""
+	matrixCandidateReason := ""
+	matrixResolutionNote := ""
+	if candidate, conflict := rules.InferMatrix(doc); candidate != nil {
+		matrixCandidate = candidate.Value
+		matrixCandidateReason = matrixCandidateReasonJSON(candidate)
+		matrixResolutionNote = conflict
+	}
+	styles, fonts, undefined := styleRowsSummary(doc)
+	definitions := make([]map[string]string, 0, len(styles))
+	for _, style := range styles {
+		values := make(map[string]string, len(style.values))
+		seenKeys := make(map[string]bool, len(style.fields))
+		for _, field := range style.fields {
+			if value, ok := style.values[field.key]; ok {
+				values[styleJSONFieldName(field.label)] = value
+				seenKeys[field.key] = true
+			}
+		}
+		for key, value := range style.values {
+			if !seenKeys[key] {
+				values[styleJSONFieldName(key)] = value
+			}
+		}
+		definitions = append(definitions, values)
+	}
+	commonFields := commonStyleFields(styles)
+	dialogues, comments, earliest, latest, minLayer, maxLayer := eventSummary(doc)
+	var timeSpan *infoTimeSpanJSON
+	if earliest >= 0 {
+		timeSpan = &infoTimeSpanJSON{
+			Start:    earliest.String(),
+			End:      latest.String(),
+			Duration: ass.Time(int64(latest) - int64(earliest)).String(),
+		}
+	}
+	var layerRange *infoLayerRangeJSON
+	if minLayer <= maxLayer {
+		layerRange = &infoLayerRangeJSON{Min: minLayer, Max: maxLayer}
+	}
+	return infoJSON{
+		Command: "info",
+		Status:  resultStatus(result),
+		Path:    path,
+		File: infoFileJSON{
+			SizeBytes:       len(source.Original),
+			Encoding:        "UTF-8",
+			BOM:             source.BOM,
+			LineEndings:     infoLineEndingsJSON{CRLF: crlf, LF: lf, Mixed: source.Mixed},
+			TrailingNewline: source.TrailingNewline,
+		},
+		Structure: infoStructureJSON{
+			Sections:              sections,
+			Properties:            properties,
+			MatrixCandidate:       matrixCandidate,
+			MatrixCandidateReason: matrixCandidateReason,
+			MatrixResolutionNote:  matrixResolutionNote,
+		},
+		Styles: infoStylesJSON{
+			Definitions:              definitions,
+			Fields:                   commonFields,
+			FontsUsed:                fonts,
+			UndefinedStyleReferences: undefined,
+		},
+		Events: infoEventsJSON{
+			Dialogue:   dialogues,
+			Comment:    comments,
+			TimeSpan:   timeSpan,
+			LayerRange: layerRange,
+		},
+		Summary:     summaryJSON(result),
+		Diagnostics: diagnosticsJSON(result.Diagnostics),
+	}
+}
+
+func matrixCandidateReasonJSON(candidate *rules.MatrixCandidate) string {
+	if candidate == nil {
+		return ""
+	}
+	reason := strings.TrimSpace(strings.TrimPrefix(candidate.Detail, candidate.Value))
+	reason = strings.TrimPrefix(reason, "(")
+	reason = strings.TrimSuffix(reason, ")")
+	return strings.TrimSpace(reason)
+}
+
+func commonStyleFields(styles []styleRow) []string {
+	if len(styles) == 0 {
+		return nil
+	}
+	common := styleFieldLabels(styles[0].fields)
+	for _, style := range styles[1:] {
+		fields := styleFieldLabels(style.fields)
+		if len(fields) != len(common) {
+			return nil
+		}
+		for index := range common {
+			if fields[index] != common[index] {
+				return nil
+			}
+		}
+	}
+	return common
+}
+
+func styleFieldLabels(fields []styleColumn) []string {
+	labels := make([]string, 0, len(fields))
+	for _, field := range fields {
+		labels = append(labels, styleJSONFieldName(field.label))
+	}
+	return labels
+}
+
+func styleJSONFieldName(key string) string {
+	trimmed := strings.TrimSpace(key)
+	switch strings.ToLower(trimmed) {
+	case "name":
+		return "name"
+	case "fontname":
+		return "font_name"
+	case "fontsize":
+		return "font_size"
+	case "primarycolour":
+		return "primary_colour"
+	case "secondarycolour":
+		return "secondary_colour"
+	case "outlinecolour":
+		return "outline_colour"
+	case "backcolour":
+		return "back_colour"
+	case "borderstyle":
+		return "border_style"
+	case "scalex":
+		return "scale_x"
+	case "scaley":
+		return "scale_y"
+	case "strikeout":
+		return "strike_out"
+	case "marginl":
+		return "margin_l"
+	case "marginr":
+		return "margin_r"
+	case "marginv":
+		return "margin_v"
+	}
+	var result strings.Builder
+	var previous rune
+	for index, r := range trimmed {
+		if index > 0 && unicode.IsUpper(r) {
+			if unicode.IsLower(previous) || unicode.IsDigit(previous) {
+				result.WriteByte('_')
+			}
+		}
+		if r == ' ' || r == '\t' || r == '-' || r == '.' {
+			result.WriteByte('_')
+			previous = r
+			continue
+		}
+		result.WriteRune(unicode.ToLower(r))
+		previous = r
+	}
+	return result.String()
 }

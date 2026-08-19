@@ -2,11 +2,102 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestJSONOutputForAllCommands(t *testing.T) {
+	data := []byte("[Script Info]\n")
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "info", args: []string{"info", "--json"}},
+		{name: "check", args: []string{"check", "--json"}},
+		{name: "normalize", args: []string{"normalize", "--json"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string(nil), test.args...)
+			if test.name == "normalize" {
+				path := filepath.Join(t.TempDir(), "sample.ass")
+				if err := os.WriteFile(path, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, path)
+			} else {
+				args = append(args, "-")
+			}
+			var out, errOut bytes.Buffer
+			code := Run(args, bytes.NewReader(data), &out, &errOut)
+			if (code != ExitOK && code != ExitCheck) || errOut.Len() != 0 {
+				t.Fatalf("%s --json failed: code=%d out=%q err=%q", test.name, code, out.String(), errOut.String())
+			}
+			var payload map[string]interface{}
+			if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+				t.Fatalf("%s --json returned invalid JSON: %v; output=%q", test.name, err, out.String())
+			}
+			if payload["command"] != test.name {
+				t.Fatalf("%s --json command field = %v", test.name, payload["command"])
+			}
+		})
+	}
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"help", "--json"}, strings.NewReader(""), &out, &errOut); code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("help --json failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	var helpPayload map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &helpPayload); err != nil || helpPayload["command"] != "help" {
+		t.Fatalf("help --json returned invalid payload: err=%v out=%q", err, out.String())
+	}
+}
+
+func TestInfoJSONSeparatesMatrixCandidateReason(t *testing.T) {
+	data := []byte("[Script Info]\nYCbCr Matrix: None\nLayoutResX: 1920\nLayoutResY: 1080\n")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"info", "--json", "-"}, bytes.NewReader(data), &out, &errOut); code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("info --json failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	var payload struct {
+		Structure struct {
+			MatrixCandidate       string `json:"matrix_candidate"`
+			MatrixCandidateReason string `json:"matrix_candidate_reason"`
+		} `json:"structure"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("info --json returned invalid JSON: %v", err)
+	}
+	if payload.Structure.MatrixCandidate != "TV.709" || payload.Structure.MatrixCandidateReason != "inferred from LayoutRes 1920x1080" {
+		t.Fatalf("unexpected matrix fields: %#v", payload.Structure)
+	}
+}
+
+func TestInfoJSONHoistsCommonStyleFields(t *testing.T) {
+	data := []byte("[Script Info]\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\nStyle: Alt,Arial,18\n")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"info", "--json", "-"}, bytes.NewReader(data), &out, &errOut); code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("info --json failed: code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	var payload struct {
+		Styles struct {
+			Fields      []string            `json:"fields"`
+			Definitions []map[string]string `json:"definitions"`
+		} `json:"styles"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("info --json returned invalid JSON: %v", err)
+	}
+	if len(payload.Styles.Fields) != 3 || len(payload.Styles.Definitions) != 2 {
+		t.Fatalf("unexpected style fields: %#v", payload.Styles)
+	}
+	for _, definition := range payload.Styles.Definitions {
+		if definition["name"] == "" || definition["font_name"] == "" || definition["font_size"] == "" || definition["values"] != "" {
+			t.Fatalf("style definition should contain complete direct values: %#v", definition)
+		}
+	}
+}
 
 func TestRunHelpAndUsageErrors(t *testing.T) {
 	var out, errOut bytes.Buffer

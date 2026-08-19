@@ -39,6 +39,10 @@ func NormalizeWithOptions(path, matrixMode string, backupEnabled, skipConfirmati
 }
 
 func NormalizeWithOutput(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) (code int) {
+	return NormalizeWithJSONOutput(path, outputPath, matrixMode, backupEnabled, skipConfirmation, false, in, out, errOut)
+}
+
+func NormalizeWithJSONOutput(path, outputPath, matrixMode string, backupEnabled, skipConfirmation, jsonOutput bool, in io.Reader, out, errOut io.Writer) (code int) {
 	path = cleanPath(path)
 	outputPath = cleanPath(outputPath)
 	trackedOut := output.Track(out)
@@ -52,13 +56,19 @@ func NormalizeWithOutput(path, outputPath, matrixMode string, backupEnabled, ski
 	}()
 	canonical, ok := rules.NormalizeMatrixValue(matrixMode)
 	if !ok {
+		if jsonOutput {
+			if jsonErr := writeJSONError(errOut, "normalize", fmt.Errorf("invalid matrix value %q", matrixMode)); jsonErr != nil {
+				return 2
+			}
+			return 2
+		}
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: invalid matrix value %q", matrixMode)))
 		return 2
 	}
-	return normalize(path, outputPath, canonical, backupEnabled, skipConfirmation, in, out, errOut)
+	return normalize(path, outputPath, canonical, backupEnabled, skipConfirmation, jsonOutput, in, out, errOut)
 }
 
-func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, in io.Reader, out, errOut io.Writer) (code int) {
+func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmation, jsonOutput bool, in io.Reader, out, errOut io.Writer) (code int) {
 	trackedOut := output.Track(out)
 	trackedErrOut := output.Track(errOut)
 	out = trackedOut
@@ -76,6 +86,12 @@ func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmat
 	}
 	doc, result, err := load(path, matrixMode)
 	if err != nil {
+		if jsonOutput {
+			if jsonErr := writeJSONError(errOut, "normalize", err); jsonErr != nil {
+				return 2
+			}
+			return 2
+		}
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: %s", err)))
 		return 2
 	}
@@ -83,12 +99,24 @@ func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmat
 	if !sameOutput {
 		inputInfo, statErr := os.Stat(path)
 		if statErr != nil {
+			if jsonOutput {
+				if jsonErr := writeJSONError(errOut, "normalize", fmt.Errorf("cannot stat input: %s", statErr)); jsonErr != nil {
+					return 2
+				}
+				return 2
+			}
 			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot stat input: %s", statErr)))
 			return 2
 		}
 		if outputInfo, outputErr := os.Stat(outputPath); outputErr == nil {
 			sameOutput = os.SameFile(inputInfo, outputInfo)
 		} else if !os.IsNotExist(outputErr) {
+			if jsonOutput {
+				if jsonErr := writeJSONError(errOut, "normalize", fmt.Errorf("cannot inspect output path %s: %s", outputPath, outputErr)); jsonErr != nil {
+					return 2
+				}
+				return 2
+			}
 			fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot inspect output path %s: %s", outputPath, outputErr)))
 			return 2
 		}
@@ -107,13 +135,28 @@ func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmat
 	edits = mergeNormalizationEdits(uniqueEdits(edits))
 	candidate, err := doc.Source.Render(rules.ToReplacements(edits))
 	if err != nil {
+		if jsonOutput {
+			if jsonErr := writeJSONError(errOut, "normalize", fmt.Errorf("cannot render normalization candidate: %s", err)); jsonErr != nil {
+				return 2
+			}
+			return 2
+		}
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: cannot render normalization candidate: %s", err)))
 		return 2
 	}
 	_, candidateResult, err := checkBytes(candidate, matrixMode)
 	if err != nil {
+		if jsonOutput {
+			if jsonErr := writeJSONError(errOut, "normalize", fmt.Errorf("normalization candidate is invalid: %s", err)); jsonErr != nil {
+				return 2
+			}
+			return 2
+		}
 		fmt.Fprintln(errOut, terminal.Color(errOut, terminal.Red, fmt.Sprintf("asst: normalization candidate is invalid: %s", err)))
 		return 2
+	}
+	if jsonOutput {
+		return normalizeJSONReport(path, outputPath, matrixMode, backupEnabled, skipConfirmation, doc, result, edits, candidate, candidateResult, sameOutput, out, errOut)
 	}
 	fmt.Fprintln(out, terminal.Color(out, terminal.Bold+terminal.Cyan, "== Normalize preview =="))
 	fmt.Fprintf(out, "Input: %s\n", formatEditValue(path))
@@ -322,6 +365,204 @@ func normalize(path, outputPath, matrixMode string, backupEnabled, skipConfirmat
 	}
 	fmt.Fprintln(out, terminal.Color(out, terminal.Magenta, "Status: normalized with manual items"))
 	return 1
+}
+
+func normalizeJSONReport(path, outputPath, matrixMode string, backupEnabled, skipConfirmation bool, doc *ass.Document, result rules.Result, edits []rules.Edit, candidate []byte, candidateResult rules.Result, sameOutput bool, out, errOut io.Writer) int {
+	report := normalizeJSON{
+		Command:            "normalize",
+		Status:             "preview",
+		Path:               path,
+		Output:             outputPath,
+		MatrixMode:         matrixMode,
+		MatrixDecision:     matrixDecisionJSON(doc, matrixMode),
+		Preview:            true,
+		Changes:            editsJSON(edits),
+		ManualItems:        diagnosticsJSON(manualDiagnostics(result)),
+		Applied:            false,
+		Backup:             "",
+		BackupWritten:      false,
+		OutputWritten:      false,
+		Summary:            summaryJSON(result),
+		Diagnostics:        diagnosticsJSON(result.Diagnostics),
+		Recheck:            nil,
+		RecheckDiagnostics: make([]jsonDiagnostic, 0),
+	}
+	if backupEnabled {
+		report.Backup = path + ".bak"
+	}
+	if len(edits) == 0 {
+		if !sameOutput {
+			if writeErr := writeOutputIfUnchanged(path, outputPath, doc.Source.Original, candidate); writeErr != nil {
+				return writeNormalizeJSONError(errOut, writeErr)
+			}
+			report.OutputWritten = true
+		}
+		report.Status = "no_changes"
+		recheck := summaryJSON(candidateResult)
+		report.Recheck = &recheck
+		report.RecheckDiagnostics = diagnosticsJSON(candidateResult.Diagnostics)
+		if err := encodeJSON(out, report); err != nil {
+			return 2
+		}
+		if candidateResult.ErrorCount() > 0 || candidateResult.ManualCount() > 0 {
+			return 1
+		}
+		return 0
+	}
+	if backupEnabled {
+		if _, statErr := os.Stat(report.Backup); statErr == nil {
+			return writeNormalizeJSONError(errOut, fmt.Errorf("backup already exists: %s", report.Backup))
+		} else if !os.IsNotExist(statErr) {
+			return writeNormalizeJSONError(errOut, fmt.Errorf("cannot inspect backup path %s: %s", report.Backup, statErr))
+		}
+	}
+	if !skipConfirmation {
+		if err := encodeJSON(out, report); err != nil {
+			return 2
+		}
+		return 0
+	}
+
+	normalizeWriteMu.Lock()
+	defer normalizeWriteMu.Unlock()
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return writeNormalizeJSONError(errOut, fmt.Errorf("cannot re-read input: %s", err))
+	}
+	if !bytes.Equal(current, doc.Source.Original) {
+		return writeNormalizeJSONError(errOut, errors.New("input changed while waiting for confirmation"))
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return writeNormalizeJSONError(errOut, fmt.Errorf("cannot stat input: %s", err))
+	}
+	var replacement *replacementTransaction
+	var after rules.Result
+	if sameOutput {
+		replacement, err = newReplacementTransaction(path, current, candidate, info.Mode().Perm())
+		if err != nil {
+			return writeNormalizeJSONError(errOut, normalizeReplacementError(err, "input changed before replacement", fmt.Sprintf("cannot prepare replacement for %s", path)))
+		}
+	}
+	backupWritten := false
+	if backupEnabled {
+		if err := writeBackup(report.Backup, current, info.Mode().Perm()); err != nil {
+			var cleanupErr error
+			if replacement != nil {
+				cleanupErr = replacement.abort()
+			}
+			if cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("cleanup failed: %w", cleanupErr))
+			}
+			return writeNormalizeJSONError(errOut, fmt.Errorf("cannot write backup %s: %s", report.Backup, err))
+		}
+		backupWritten = true
+	}
+	if replacement != nil {
+		if err := replacement.install(); err != nil {
+			cleanupErr := replacement.abort()
+			if backupWritten && !replacement.preservationFailed() {
+				if removeErr := os.Remove(report.Backup); removeErr != nil && !os.IsNotExist(removeErr) {
+					cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove backup after failed replacement: %w", removeErr))
+				}
+			}
+			if cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("cleanup failed: %w", cleanupErr))
+			}
+			return writeNormalizeJSONError(errOut, fmt.Errorf("cannot replace %s: %s", path, err))
+		}
+		_, after, err = load(path, matrixMode)
+		if err == nil {
+			applied, readErr := os.ReadFile(path)
+			if readErr != nil {
+				err = readErr
+			} else if !bytes.Equal(applied, candidate) {
+				err = errNormalizeInputChanged
+			}
+		}
+		if err != nil {
+			rollbackErr := replacement.rollback()
+			if rollbackErr != nil {
+				err = errors.Join(err, fmt.Errorf("rollback failed: %w", rollbackErr))
+			}
+			return writeNormalizeJSONError(errOut, fmt.Errorf("normalized file cannot be checked: %s", err))
+		}
+		if err := replacement.commit(); err != nil {
+			return writeNormalizeJSONError(errOut, fmt.Errorf("normalized file was applied but temporary cleanup failed: %s", err))
+		}
+	} else {
+		if err := writeOutputFile(outputPath, candidate, info.Mode().Perm()); err != nil {
+			if backupWritten {
+				if removeErr := os.Remove(report.Backup); removeErr != nil && !os.IsNotExist(removeErr) {
+					err = errors.Join(err, fmt.Errorf("remove backup after failed output: %w", removeErr))
+				}
+			}
+			return writeNormalizeJSONError(errOut, fmt.Errorf("cannot write output %s: %s", outputPath, err))
+		}
+		applied, readErr := os.ReadFile(outputPath)
+		if readErr != nil {
+			err = readErr
+		} else if !bytes.Equal(applied, candidate) {
+			err = errNormalizeInputChanged
+		} else {
+			_, after, err = checkBytes(applied, matrixMode)
+		}
+		if err != nil {
+			return writeNormalizeJSONError(errOut, fmt.Errorf("normalized output cannot be checked: %s", err))
+		}
+	}
+	report.Status = "normalized"
+	report.Preview = false
+	report.Applied = true
+	report.BackupWritten = backupWritten
+	report.OutputWritten = true
+	recheck := summaryJSON(after)
+	report.Recheck = &recheck
+	report.RecheckDiagnostics = diagnosticsJSON(after.Diagnostics)
+	if after.ErrorCount() > 0 || after.ManualCount() > 0 {
+		report.Status = "manual_review"
+	}
+	if err := encodeJSON(out, report); err != nil {
+		return 2
+	}
+	if after.ErrorCount() > 0 || after.ManualCount() > 0 {
+		return 1
+	}
+	return 0
+}
+
+func writeNormalizeJSONError(errOut io.Writer, err error) int {
+	if jsonErr := writeJSONError(errOut, "normalize", err); jsonErr != nil {
+		return 2
+	}
+	return 2
+}
+
+func normalizeReplacementError(err error, changedMessage, prepareMessage string) error {
+	if errors.Is(err, errNormalizeInputChanged) {
+		return errors.New(changedMessage)
+	}
+	return fmt.Errorf("%s: %s", prepareMessage, err)
+}
+
+func matrixDecisionJSON(doc *ass.Document, matrixMode string) string {
+	if strings.EqualFold(matrixMode, "auto") {
+		property := doc.ScriptProperties()["ycbcr matrix"]
+		if canonical, ok := rules.NormalizeMatrixValue(property.Value); ok {
+			if candidate, _ := rules.InferMatrix(doc); candidate != nil {
+				return fmt.Sprintf("retain existing %s (valid; matches candidate %s)", canonical, candidate.Detail)
+			}
+			return fmt.Sprintf("retain existing %s (valid)", canonical)
+		}
+		if candidate, _ := rules.InferMatrix(doc); candidate != nil {
+			return candidate.Detail
+		}
+		return "manual review required"
+	}
+	if canonical, ok := rules.NormalizeMatrixValue(matrixMode); ok {
+		return fmt.Sprintf("%s (explicit override)", canonical)
+	}
+	return ""
 }
 
 func sourceFormatEdits(doc *ass.Document) []rules.Edit {

@@ -19,21 +19,21 @@ func commandRegistry() []commandSpec {
 	return []commandSpec{
 		{
 			name:    "info",
-			usage:   "asst info [--strict] [-|--input|<input.ass>]",
+			usage:   "asst info [--strict] [--json] [-|--input|<input.ass>]",
 			summary: "summarize structure, timing, fonts, and compliance",
 			handler: runInfo,
 			help:    printInfoHelp,
 		},
 		{
 			name:    "check",
-			usage:   "asst check [--ignore-vsfiltermod] [-|--input|<input.ass>]",
+			usage:   "asst check [--ignore-vsfiltermod] [--json] [-|--input|<input.ass>]",
 			summary: "print stable compliance diagnostics",
 			handler: runCheck,
 			help:    printCheckHelp,
 		},
 		{
 			name:    "normalize",
-			usage:   "asst normalize [--backup] [--output <path>] [--yes] [--matrix <auto|value>] <input.ass>",
+			usage:   "asst normalize [--backup] [--output <path>] [--yes] [--json] [--matrix <auto|value>] <input.ass>",
 			summary: "preview safe edits, then optionally apply them",
 			handler: runNormalize,
 			help:    printNormalizeHelp,
