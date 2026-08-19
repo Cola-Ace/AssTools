@@ -1,15 +1,15 @@
-# v0.2.0
+# v0.3.0
 
 ## Highlights
 
-- Add standard-input support to `info` and `check` with `-`/`--input`.
-- Add `info --strict` for compliance-aware exit status.
-- Add `normalize --output` to write a normalized candidate to another path.
-- Improve matrix validation and canonicalization, including automatic resolution-based inference.
-- Make in-place normalization transactional and recheck the candidate before committing, restoring the original when validation fails.
-- Improve output reliability, section scanning, and handling of current-directory input paths.
+- Add `--json` output to every command for stable, machine-readable results.
+- Add normalized JSON summaries for `info`, including file metadata, structure, styles, events, and diagnostics.
+- Add normalized JSON diagnostics and summary output for `check`, including its compliance status and exit behavior.
+- Add normalized JSON previews and command metadata for `normalize` and `help`.
+- Keep JSON output consistent with the existing command exit codes, including structured errors.
 
 ## Compatibility
 
 - Existing command-line workflows remain supported.
+- Human-readable output remains the default when `--json` is not specified.
 - Release artifacts continue to target Windows, Linux, and macOS on `amd64` and `arm64`.
